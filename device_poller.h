@@ -1,0 +1,4 @@
+#ifndef DEVICE_POLLER_H
+#define DEVICE_POLLER_H
+
+#endif // DEVICE_POLLER_H

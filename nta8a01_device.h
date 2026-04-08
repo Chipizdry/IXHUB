@@ -1,0 +1,4 @@
+#ifndef NTA8A01_DEVICE_H
+#define NTA8A01_DEVICE_H
+
+#endif // NTA8A01_DEVICE_H
