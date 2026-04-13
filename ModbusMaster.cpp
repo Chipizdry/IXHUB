@@ -1,10 +1,12 @@
+
+
+
 #include "ModbusMaster.h"
 #include <QDebug>
 
 ModbusMaster::ModbusMaster(QObject *parent) : QObject(parent)
 {
     connect(&serial, &QSerialPort::readyRead, this, &ModbusMaster::onReadyRead);
-
     timeoutTimer.setSingleShot(true);
     connect(&timeoutTimer, &QTimer::timeout, this, &ModbusMaster::onTimeout);
 }
@@ -38,9 +40,42 @@ void ModbusMaster::readHoldingRegisters(quint8 slaveAddr, quint16 startAddr, qui
     }
 
     QByteArray req = buildRequest(slaveAddr, 0x03, startAddr, count);
+    qDebug() << "🔵 ModbusMaster: Sending to slave" << slaveAddr << ":" << req.toHex();
+
     rxBuffer.clear();
-    serial.write(req);
-    timeoutTimer.start(1000); // таймаут 1 сек
+    qint64 written = serial.write(req);
+
+    if (written != req.size()) {
+        qDebug() << "❌ ModbusMaster: Failed to write all data";
+        emit error("Failed to write all data");
+        return;
+    }
+
+    serial.flush();
+    timeoutTimer.start(1000);
+    qDebug() << "🔵 ModbusMaster: Timeout timer started (1000ms)";
+}
+
+void ModbusMaster::sendRawData(quint8 /*slaveAddr*/, const QByteArray& data)
+{
+    if (!serial.isOpen()) {
+        qDebug() << "Serial port not open";
+        emit error("Serial port not open");
+        return;
+    }
+
+    qDebug() << "📤 Sending raw data:" << data.toHex();
+
+    rxBuffer.clear();
+    qint64 bytesWritten = serial.write(data);
+    if (bytesWritten != data.size()) {
+        qDebug() << "Failed to send all data, written:" << bytesWritten << "expected:" << data.size();
+        emit error("Failed to send all data");
+        return;
+    }
+
+    serial.flush();
+    timeoutTimer.start(1000);
 }
 
 QByteArray ModbusMaster::buildRequest(quint8 slave, quint8 func, quint16 addr, quint16 count)
@@ -62,31 +97,37 @@ QByteArray ModbusMaster::buildRequest(quint8 slave, quint8 func, quint16 addr, q
 
 void ModbusMaster::onReadyRead()
 {
-    rxBuffer += serial.readAll();
+    QByteArray newData = serial.readAll();
+    rxBuffer += newData;
 
-    // минимальная длина ответа: slave + func + byte count + crc
-    if (rxBuffer.size() < 5) return;
+    qDebug() << "🔵 Received raw:" << newData.toHex() << "(total:" << rxBuffer.size() << "bytes)";
+
+    if (rxBuffer.size() < 5) {
+        qDebug() << "🔵 Waiting for more data...";
+        return;
+    }
 
     timeoutTimer.stop();
 
     QByteArray data = rxBuffer.left(rxBuffer.size() - 2);
-
-    quint16 crcRecv =
-        (quint8)rxBuffer.at(rxBuffer.size() - 2) |
-        ((quint8)rxBuffer.at(rxBuffer.size() - 1) << 8);
-
+    quint16 crcRecv = (quint8)rxBuffer.at(rxBuffer.size() - 2) |
+                      ((quint8)rxBuffer.at(rxBuffer.size() - 1) << 8);
     quint16 crcCalc = calcCRC(data);
 
     if (crcRecv != crcCalc) {
+        qDebug() << "❌ CRC error! Received:" << QString::number(crcRecv, 16)
+                 << "Calculated:" << QString::number(crcCalc, 16);
         emit error("CRC error");
         return;
     }
 
+    qDebug() << "✅ Valid Modbus response received";
     emit dataReady(rxBuffer);
 }
 
 void ModbusMaster::onTimeout()
 {
+    qDebug() << "⏰ Modbus timeout - no response";
     emit error("Timeout waiting for response");
 }
 

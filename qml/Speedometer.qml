@@ -209,7 +209,8 @@ Rectangle {
     // ===== ЦИФРЫ =====
     Text {
         anchors.centerIn: parent
-        text: Math.round(root.speedValue) + "\nRPM"
+        anchors.verticalCenterOffset: 70
+        text: Math.round(root.speedValue) + "\nОб/Мин."
         color: "white"
         font.pixelSize: 22
         font.bold: true
@@ -218,7 +219,7 @@ Rectangle {
 
     Text {
         anchors.bottom: parent.bottom
-        anchors.bottomMargin: 20
+        anchors.bottomMargin: 60
         anchors.horizontalCenter: parent.horizontalCenter
         text: "Скорость маховика"
         color: "#bdc3c7"

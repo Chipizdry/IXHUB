@@ -1,3 +1,6 @@
+
+
+
 #pragma once
 
 #include <QObject>
@@ -8,6 +11,7 @@
 class ModbusMaster : public QObject
 {
     Q_OBJECT
+
 public:
     explicit ModbusMaster(QObject *parent = nullptr);
     ~ModbusMaster();
@@ -17,6 +21,9 @@ public:
 
     // Отправка запроса: чтение holding registers
     void readHoldingRegisters(quint8 slaveAddr, quint16 startAddr, quint16 count);
+
+    // Отправка сырых данных (для реле и других устройств)
+    void sendRawData(quint8 slaveAddr, const QByteArray& data);  // Изменено с bool на void
 
 signals:
     void dataReady(QByteArray data);

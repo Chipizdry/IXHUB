@@ -1,6 +1,8 @@
-<!DOCTYPE RCC>
-<RCC version="1.0">
+<RCC>
     <qresource prefix="/">
         <file>qml/Speedometer.qml</file>
+        <file>qml/VerticalGauge.qml</file>
+        <file>qml/TemperatureSensor.qml</file>
+        <file>qml/PowerButton.qml</file>
     </qresource>
 </RCC>

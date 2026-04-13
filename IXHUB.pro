@@ -30,14 +30,24 @@ DEFINES += QT_DEPRECATED_WARNINGS
 SOURCES += \
     ModbusMaster.cpp \
     WSClient.cpp \
+    device.cpp \
+    device_manager.cpp \
+    device_poller.cpp \
     main.cpp \
-    mainwindow.cpp
+    mainwindow.cpp \
+    nta8a01_device.cpp \
+    relay_device.cpp
 
 
 HEADERS += \
     ModbusMaster.h \
     WSClient.h \
-    mainwindow.h
+    device.h \
+    device_manager.h \
+    device_poller.h \
+    mainwindow.h \
+    nta8a01_device.h \
+    relay_device.h
 
 FORMS += \
     mainwindow.ui
@@ -63,6 +73,8 @@ INCLUDEPATH += \
 #    -isystem /usr/lib/gcc-cross/aarch64-linux-gnu/9/include \
 #    -isystem /usr/aarch64-linux-gnu/include \
 #    -isystem /root/ixp_sysroot/usr/include
+
+QMAKE_CXXFLAGS += -Wno-deprecated-copy
 
 LIBS += -L/root/ixp_sysroot/usr/lib -lssl -lcrypto
 
