@@ -83,6 +83,9 @@ int main(int argc, char *argv[])
 {
     QApplication a(argc, argv);
 
+    // Скрываем курсор мыши для всего приложения
+    a.setOverrideCursor(QCursor(Qt::BlankCursor));
+
     // Настройка устройств
     setupDefaultDevices();
 

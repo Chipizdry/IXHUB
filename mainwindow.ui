@@ -63,7 +63,7 @@ QTabBar::tab:selected {
 }</string>
     </property>
     <property name="currentIndex">
-     <number>0</number>
+     <number>3</number>
     </property>
     <property name="usesScrollButtons">
      <bool>false</bool>
@@ -89,7 +89,7 @@ QTabBar::tab:selected {
       <string>Настройки</string>
      </attribute>
     </widget>
-    <widget class="QWidget" name="Setings">
+    <widget class="QWidget" name="Statistics">
      <attribute name="title">
       <string>Статистика</string>
      </attribute>

@@ -14,8 +14,8 @@
 #include <QDebug>
 #include "device_manager.h"
 #include "relay_device.h"
-#include "device_poller.h"      // ДОБАВИТЬ
-#include "ModbusMaster.h"       // ДОБАВИТЬ
+#include "device_poller.h"
+#include "ModbusMaster.h"
 
 // Глобальные указатели (определены в main.cpp)
 extern DevicePoller* g_poller;
@@ -26,11 +26,15 @@ MainWindow::MainWindow(QWidget *parent)
     , ui(new Ui::MainWindow)
 {
     ui->setupUi(this);
+    // Устанавливаем вкладку "Информация" как активную по умолчанию
+    ui->tabWidget->setCurrentIndex(0);
 
     QWidget *infoTab = ui->Info;
+    QWidget *statisticsTab = ui->Statistics;
 
     // Удаляем существующий layout, если есть
     delete infoTab->layout();
+    delete statisticsTab->layout();
 
     // ========== Находим устройство реле (адрес 0x0A = 10) ==========
     m_relayDevice = dynamic_cast<RelayDevice*>(
@@ -48,7 +52,6 @@ MainWindow::MainWindow(QWidget *parent)
     powerWidget->setFixedSize(120, 400);
     powerWidget->setResizeMode(QQuickWidget::SizeRootObjectToView);
 
-    // Устанавливаем контекстные свойства ДО загрузки QML
     QQmlContext *powerContext = powerWidget->rootContext();
     powerContext->setContextProperty("gaugeLabel", "Мощность");
     powerContext->setContextProperty("gaugeUnit", "Вт/Час");
@@ -70,7 +73,6 @@ MainWindow::MainWindow(QWidget *parent)
     torqueWidget->setFixedSize(120, 400);
     torqueWidget->setResizeMode(QQuickWidget::SizeRootObjectToView);
 
-    // Устанавливаем контекстные свойства ДО загрузки QML
     QQmlContext *torqueContext = torqueWidget->rootContext();
     torqueContext->setContextProperty("gaugeLabel", "Ток");
     torqueContext->setContextProperty("gaugeUnit", "А");
@@ -85,24 +87,43 @@ MainWindow::MainWindow(QWidget *parent)
     powerButtonWidget->setFixedSize(80, 80);
     powerButtonWidget->setResizeMode(QQuickWidget::SizeRootObjectToView);
     powerButtonWidget->setSource(QUrl("qrc:/qml/PowerButton.qml"));
-
-    // Размещаем кнопку
     powerButtonWidget->move(920, 400);
 
-    // Подключаем сигнал от кнопки
     QObject *buttonRoot = powerButtonWidget->rootObject();
     if (buttonRoot) {
-        // Подключаем сигнал toggled к слоту
         connect(buttonRoot, SIGNAL(toggled(bool)),
                 this, SLOT(onPowerButtonToggled(bool)));
-
-        // Устанавливаем начальное состояние (выключено)
         buttonRoot->setProperty("isOn", false);
+    }
+
+    // ========== 5. График для вкладки Статистика ==========
+
+    // Удаляем существующий layout
+    //delete statisticsTab->layout();
+
+    QQuickWidget *chartWidget = new QQuickWidget(statisticsTab);
+    chartWidget->setFixedSize(1020, 510);
+    chartWidget->setResizeMode(QQuickWidget::SizeRootObjectToView);
+    chartWidget->setSource(QUrl("qrc:/qml/ChartView.qml"));
+
+    // Размещаем график по координатам (x, y)
+    chartWidget->move(00, 0);  // Задайте нужные координаты
+
+    // Настраиваем свойства графика
+    QObject *chartRoot = chartWidget->rootObject();
+    if (chartRoot) {
+        chartRoot->setProperty("chartTitle", "Динамика скорости маховика");
+        chartRoot->setProperty("xAxisLabel", "Время (сек)");
+        chartRoot->setProperty("yAxisLabel", "Скорость (об/мин)");
+        chartRoot->setProperty("maxYValue", 10000);
+        chartRoot->setProperty("minYValue", 0);
     }
 
     // ========== Таймер для тестирования с управлением от кнопки ==========
     QTimer *updateTimer = new QTimer(this);
-    connect(updateTimer, &QTimer::timeout, [this]() {
+
+    // Захватываем chartWidget в лямбду
+    connect(updateTimer, &QTimer::timeout, [this, chartWidget]() {
         // Проверяем состояние кнопки
         if (powerButtonWidget && powerButtonWidget->rootObject()) {
             bool isOn = powerButtonWidget->rootObject()->property("isOn").toBool();
@@ -124,6 +145,29 @@ MainWindow::MainWindow(QWidget *parent)
                 updateSpeed(speed);
                 updatePower(power);
                 updateTorque(torque);
+
+                // Обновляем график
+                if (chartWidget && chartWidget->rootObject()) {
+                    // Получаем текущие точки
+                    QVariantList currentPoints = chartWidget->rootObject()->property("dataPoints").toList();
+
+                    // Создаем новую точку
+                    QVariantMap newPoint;
+                    newPoint["x"] = currentPoints.size();
+                    newPoint["y"] = speed;
+
+                    // Добавляем точку
+                    QVariantList newPoints = currentPoints;
+                    newPoints.append(newPoint);
+
+                    // Ограничиваем количество точек (150)
+                    if (newPoints.size() > 150) {
+                        newPoints.removeFirst();
+                    }
+
+                    // Обновляем график
+                    chartWidget->rootObject()->setProperty("dataPoints", newPoints);
+                }
             } else {
                 // Если выключено - сбрасываем все значения на ноль
                 updateSpeed(0);
@@ -142,29 +186,23 @@ MainWindow::~MainWindow()
     delete ui;
 }
 
-// Реализация слота для кнопки
 void MainWindow::onPowerButtonToggled(bool state)
 {
     qDebug() << "🔘 Кнопка переключена:" << (state ? "ВКЛ" : "ВЫКЛ");
 
-    // Управляем реле 1
     if (m_relayDevice) {
         qDebug() << "📡 Отправляем команду на реле 1:" << (state ? "ON" : "OFF");
-
-        // Генерируем команду для реле 1 (теперь метод публичный)
         QByteArray command = m_relayDevice->generateSetRelayCommand(1, state);
 
         if (!command.isEmpty() && g_poller) {
-            // Отправляем через поллер как приоритетную команду
             QString commandName = state ? "SetRelay1_ON" : "SetRelay1_OFF";
             g_poller->sendPriorityCommand(0x0A, command, commandName);
             qDebug() << "✅ Команда отправлена в очередь поллера";
         } else if (!command.isEmpty() && g_master) {
-            // Fallback: прямая отправка (если поллер недоступен)
             qDebug() << "⚠️ Poller not available, sending directly via ModbusMaster";
             g_master->sendRawData(0x0A, command);
         } else {
-            qDebug() << "❌ Failed to send command - no command generated or no transport available";
+            qDebug() << "❌ Failed to send command";
         }
     } else {
         qDebug() << "❌ Relay device not available!";
