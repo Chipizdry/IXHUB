@@ -1,3 +1,6 @@
+
+
+
 import QtQuick 2.12
 import QtQuick.Controls 2.12
 
@@ -38,41 +41,53 @@ Item {
 
         // Символ питания
         Item {
+            id: symbolContainer
             anchors.centerIn: parent
             width: parent.width * 0.6
             height: parent.height * 0.6
 
-            // Вертикальная линия (черта) - поднята вверх
+            // Вертикальная линия (черта) - с анимацией высоты и вертикального смещения
             Rectangle {
                 id: verticalLine
                 anchors.horizontalCenter: parent.horizontalCenter
-                anchors.top: parent.top
-                anchors.topMargin: parent.height * 0.15
-                width: parent.width * 0.06
-                height: parent.height * 0.45
+                width: parent.width * 0.08
+                height: parent.height * (powerButton.isOn ? 0.3 : 0.5)
                 radius: width / 2
                 color: powerButton.isOn ? powerButton.colorOn : powerButton.colorOff
+
+                // Явное указание позиции Y с динамическим расчётом
+                y: powerButton.isOn ? parent.height * 0.35 : parent.height * 0.07
 
                 Behavior on color {
                     ColorAnimation { duration: 200 }
                 }
 
-                // Анимация масштаба при переключении
-                scale: powerButton.isOn ? 0.9 : 1
-                Behavior on scale {
-                    NumberAnimation { duration: 150; easing.type: Easing.OutBack }
+                Behavior on height {
+                    NumberAnimation {
+                        duration: 300
+                        easing.type: Easing.InOutQuad
+                    }
+                }
+
+                Behavior on y {
+                    NumberAnimation {
+                        duration: 300
+                        easing.type: Easing.OutBack
+                    }
                 }
             }
 
-            // Дуга (разрезанный круг)
+            // Дуга (анимированный разрезанный круг)
             Canvas {
                 id: arcCanvas
                 anchors.fill: parent
                 antialiasing: true
 
-                // Явно указываем зависимость от isOn для перерисовки
-                property bool needsRedraw: powerButton.isOn
-                onNeedsRedrawChanged: requestPaint()
+                property real startAngle: powerButton.isOn ? -Math.PI / 2 - 0.3 : -Math.PI / 2 + 0.4
+                property real endAngle: powerButton.isOn ? Math.PI * 1.5 + 0.3 : Math.PI * 1.5 - 0.4
+
+                onStartAngleChanged: requestPaint()
+                onEndAngleChanged: requestPaint()
 
                 onPaint: {
                     var ctx = getContext("2d");
@@ -84,28 +99,16 @@ Item {
                     var radius = width / 2;
 
                     ctx.save();
-                    // Цвет дуги меняется в зависимости от isOn
                     ctx.strokeStyle = powerButton.isOn ? powerButton.colorOn : powerButton.colorOff;
                     ctx.lineWidth = radius * 0.15;
                     ctx.lineCap = "round";
 
-                    // Рисуем дугу окружности (незамкнутый круг)
-                    var startAngle = -Math.PI / 2 + 0.4;
-                    var endAngle = Math.PI * 1.5 - 0.4;
-
+                    // Рисуем дугу с анимированными углами
                     ctx.beginPath();
                     ctx.arc(centerX, centerY, radius * 0.7, startAngle, endAngle);
                     ctx.stroke();
 
                     ctx.restore();
-                }
-
-                // Дополнительный вызов перерисовки при изменении isOn
-                Connections {
-                    target: powerButton
-                    function onIsOnChanged() {
-                        arcCanvas.requestPaint();
-                    }
                 }
             }
         }
@@ -115,6 +118,8 @@ Item {
             onClicked: {
                 powerButton.isOn = !powerButton.isOn;
                 powerButton.toggled(powerButton.isOn);
+
+                // Анимация нажатия
                 mainCircle.scale = 0.95;
                 scaleTimer.start();
             }

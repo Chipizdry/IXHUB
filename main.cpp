@@ -21,6 +21,9 @@
 #include <QQmlContext>
 #include <QVBoxLayout>
 
+ModbusMaster* g_master = nullptr;
+DevicePoller* g_poller = nullptr;
+
 
 class Logger {
 public:
@@ -69,7 +72,7 @@ void setupDefaultDevices() {
     dm.addDevice(new NTA8A01Device(4));
     dm.addDevice(new NTA8A01Device(5));
     dm.addDevice(new NTA8A01Device(6));
-    dm.addDevice(new RelayDevice(0xFF));
+    dm.addDevice(new RelayDevice(0x0A));
 
 
     // Загружаем конфигурацию если есть
@@ -84,7 +87,9 @@ int main(int argc, char *argv[])
     setupDefaultDevices();
 
     ModbusMaster master;
+    g_master = &master;
     DevicePoller poller(&master);
+    g_poller = &poller;
 
     // Получаем серийный номер устройства
     QString serialNumber = getCpuSerialNumber();

@@ -1,8 +1,6 @@
 
 
 
-
-
 #include "device_poller.h"
 #include "device_manager.h"
 #include "device.h"
@@ -37,6 +35,37 @@ DevicePoller::DevicePoller(ModbusMaster* master, QObject *parent)
 DevicePoller::~DevicePoller()
 {
     stop();
+}
+
+// НОВЫЙ МЕТОД: Отправка приоритетной команды
+void DevicePoller::sendPriorityCommand(int slaveId, const QByteArray& command, const QString& commandName)
+{
+    if (!m_isRunning) {
+        qDebug() << "⚠️ DevicePoller not running, cannot send priority command";
+        return;
+    }
+
+    // Создаем приоритетную задачу
+    PollTask priorityTask(slaveId, command, commandName, 0, true);
+
+    // Вставляем в начало очереди
+    QQueue<PollTask> newQueue;
+    newQueue.enqueue(priorityTask);
+
+    // Добавляем остальные задачи
+    for (const PollTask& task : m_taskQueue) {
+        newQueue.enqueue(task);
+    }
+
+    m_taskQueue = newQueue;
+
+    qDebug() << "⭐ PRIORITY command added:" << commandName
+             << "(slave:" << slaveId << ") Queue size:" << m_taskQueue.size();
+
+    // Если не ждем ответ, сразу начинаем обработку
+    if (!m_isWaiting) {
+        processNextTask();
+    }
 }
 
 void DevicePoller::start(int intervalMs)
@@ -181,13 +210,13 @@ QList<PollTask> DevicePoller::generateTasksForDevice(Device* device)
             RelayDevice* relay = static_cast<RelayDevice*>(device);
 
             // Задача 0: Чтение состояния реле
-            QByteArray relayCmd = relay->generateReadRelayStatusCommand();  // Исправлено имя
+            QByteArray relayCmd = relay->generateReadRelayStatusCommand();
             if (!relayCmd.isEmpty()) {
                 tasks.append(PollTask(slaveId, relayCmd, "ReadRelayStatus", 0));
             }
 
             // Задача 1: Чтение состояния оптопар
-            QByteArray optoCmd = relay->generateReadOptocouplerCommand();  // Теперь публичный
+            QByteArray optoCmd = relay->generateReadOptocouplerCommand();
             if (!optoCmd.isEmpty()) {
                 tasks.append(PollTask(slaveId, optoCmd, "ReadOptocouplerStatus", 1));
             }
@@ -211,6 +240,7 @@ void DevicePoller::sendCommand(const PollTask& task)
     qDebug() << "📤 Sending task:" << task.taskName
              << "(slave:" << task.slaveId
              << ", subtask:" << task.subTaskId
+             << ", priority:" << (task.isPriority ? "YES" : "NO")
              << ", cmd:" << task.command.toHex() << ")";
 
     // Отправляем сырые данные
@@ -244,6 +274,7 @@ void DevicePoller::processNextTask()
 
     qDebug() << "🔄 Processing task:" << m_currentTask.taskName
              << "(slave:" << m_currentTask.slaveId
+             << ", priority:" << (m_currentTask.isPriority ? "YES" : "NO")
              << ", remaining:" << m_taskQueue.size() << ")";
 
     m_isWaiting = true;

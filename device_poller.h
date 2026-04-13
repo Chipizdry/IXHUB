@@ -19,10 +19,11 @@ struct PollTask {
     int subTaskId;      // Для устройств с несколькими задачами
     QString taskName;   // Имя задачи для отладки
     QByteArray command; // Готовый Modbus команда для отправки
+    bool isPriority;    // Флаг приоритетной команды
 
-    PollTask() : slaveId(-1), subTaskId(0) {}
-    PollTask(int id, const QByteArray& cmd, const QString& name = "", int subId = 0)
-        : slaveId(id), subTaskId(subId), taskName(name), command(cmd) {}
+    PollTask() : slaveId(-1), subTaskId(0), isPriority(false) {}
+    PollTask(int id, const QByteArray& cmd, const QString& name = "", int subId = 0, bool priority = false)
+        : slaveId(id), subTaskId(subId), taskName(name), command(cmd), isPriority(priority) {}
 };
 
 class DevicePoller : public QObject
@@ -39,6 +40,9 @@ public:
 
     // Принудительный опрос конкретного устройства
     void pollDeviceNow(int slaveId, const QString& taskName = "");
+
+    // НОВЫЙ МЕТОД: Отправка приоритетной команды (например, управление реле)
+    void sendPriorityCommand(int slaveId, const QByteArray& command, const QString& commandName);
 
 signals:
     void deviceDataReady(int slaveId, const QJsonObject& data);
@@ -77,5 +81,6 @@ private:
 };
 
 #endif // DEVICE_POLLER_H
+
 
 

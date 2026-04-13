@@ -33,7 +33,8 @@ public:
 
     // Генерация команд (публичные методы для DevicePoller)
     QByteArray generateReadRelayStatusCommand() const;
-    QByteArray generateReadOptocouplerCommand() const;  // ТОЛЬКО ОДИН РАЗ!
+    QByteArray generateReadOptocouplerCommand() const;
+    QByteArray generateSetRelayCommand(int relayNumber, bool on) const;
 
 signals:
     void commandGenerated(const QByteArray& command);
@@ -67,7 +68,7 @@ private:
     // Приватные методы генерации команд
     QByteArray generateReadAddressCommand() const;
     QByteArray generateReadBaudRateCommand() const;
-    QByteArray generateSetRelayCommand(int relayNumber, bool on) const;
+
     QByteArray generateSetAllRelaysCommand(bool on) const;
     QByteArray generateSetAddressCommand(quint8 newAddress) const;
     QByteArray generateSetBaudRateCommand(int baudRate) const;
