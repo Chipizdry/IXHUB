@@ -381,7 +381,7 @@ Rectangle {
             }
         }
 
-        // Содержимое панели
+        // Содержимое панели - убраны лишние кнопки
         ScrollView {
             anchors.top: panelHeader.bottom
             anchors.left: parent.left
@@ -460,114 +460,67 @@ Rectangle {
                     opacity: 0.5
                 }
 
+                // Только чекбоксы и названия параметров (без кнопок Левая и Очистить)
                 Repeater {
                     model: Object.keys(parameterConfig)
 
-                    ColumnLayout {
-                        spacing: 3
+                    RowLayout {
+                        spacing: 5
+                        Layout.fillWidth: true
 
-                        RowLayout {
-                            spacing: 5
+                        CheckBox {
+                            id: cb
+                            checked: parameterConfig[modelData].visible
+                            onCheckedChanged: {
+                                parameterConfig[modelData].visible = checked;
+                                if (autoScaleLeft || autoScaleRight) updateYScales();
+                                canvas.requestPaint();
+                            }
 
-                            CheckBox {
-                                id: cb
-                                checked: parameterConfig[modelData].visible
-                                onCheckedChanged: {
-                                    parameterConfig[modelData].visible = checked;
-                                    if (autoScaleLeft || autoScaleRight) updateYScales();
-                                    canvas.requestPaint();
+                            indicator: Rectangle {
+                                implicitWidth: 16
+                                implicitHeight: 16
+                                color: cb.checked ? parameterConfig[modelData].color : "#2c3e50"
+                                border.color: "#3498db"
+                                border.width: 1
+                                radius: 3
+
+                                Text {
+                                    text: "✓"
+                                    color: "white"
+                                    font.pixelSize: 12
+                                    anchors.centerIn: parent
+                                    visible: cb.checked
                                 }
-
-                                indicator: Rectangle {
-                                    implicitWidth: 16
-                                    implicitHeight: 16
-                                    color: cb.checked ? parameterConfig[modelData].color : "#2c3e50"
-                                    border.color: "#3498db"
-                                    border.width: 1
-                                    radius: 3
-
-                                    Text {
-                                        text: "✓"
-                                        color: "white"
-                                        font.pixelSize: 12
-                                        anchors.centerIn: parent
-                                        visible: cb.checked
-                                    }
-                                }
-                            }
-
-                            Rectangle {
-                                width: 16
-                                height: 16
-                                radius: 2
-                                color: parameterConfig[modelData].color
-                            }
-
-                            Text {
-                                text: modelData
-                                color: "white"
-                                font.pixelSize: 10
-                                font.bold: true
-                                Layout.fillWidth: true
-                            }
-
-                            Text {
-                                text: parameterConfig[modelData].unit
-                                color: "#a5a5a5"
-                                font.pixelSize: 8
                             }
                         }
 
-                        RowLayout {
-                            spacing: 5
-                            visible: parameterConfig[modelData].visible
+                        Rectangle {
+                            width: 16
+                            height: 16
+                            radius: 2
+                            color: parameterConfig[modelData].color
+                        }
 
-                            Text {
-                                text: "Ось Y:"
-                                color: "#a5a5a5"
-                                font.pixelSize: 8
-                            }
+                        Text {
+                            text: modelData
+                            color: "white"
+                            font.pixelSize: 10
+                            font.bold: true
+                            Layout.fillWidth: true
+                        }
 
-                            Button {
-                                text: parameterConfig[modelData].yAxis === "left" ? "← Левая" : "→ Правая"
-                                height: 20
-                                Layout.fillWidth: true
-                                background: Rectangle {
-                                    color: parent.pressed ? "#2980b9" : "#34495e"
-                                    radius: 3
-                                }
-                                contentItem: Text {
-                                    text: parent.text
-                                    color: "white"
-                                    font.pixelSize: 8
-                                    horizontalAlignment: Text.AlignHCenter
-                                }
-                                onClicked: {
-                                    parameterConfig[modelData].yAxis =
-                                        parameterConfig[modelData].yAxis === "left" ? "right" : "left";
-                                    updateYScales();
-                                    canvas.requestPaint();
-                                }
-                            }
+                        Text {
+                            text: parameterConfig[modelData].unit
+                            color: "#a5a5a5"
+                            font.pixelSize: 8
+                        }
 
-                            Button {
-                                text: "Очистить"
-                                height: 20
-                                width: 60
-                                background: Rectangle {
-                                    color: parent.pressed ? "#c0392b" : "#e74c3c"
-                                    radius: 3
-                                }
-                                contentItem: Text {
-                                    text: parent.text
-                                    color: "white"
-                                    font.pixelSize: 8
-                                    horizontalAlignment: Text.AlignHCenter
-                                }
-                                onClicked: {
-                                    clearParameter(modelData);
-                                }
-                            }
+                        // Маленький индикатор оси Y
+                        Text {
+                            text: parameterConfig[modelData].yAxis === "left" ? "←" : "→"
+                            color: parameterConfig[modelData].yAxis === "left" ? "#00cc00" : "#f39c12"
+                            font.pixelSize: 8
                         }
                     }
                 }

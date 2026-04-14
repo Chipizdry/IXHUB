@@ -181,7 +181,7 @@ void MainWindow::initializeChart()
     m_chartData->chartRoot = chartRoot;
 
     // Настраиваем свойства графика
-    chartRoot->setProperty("chartTitle", "Динамика скорости маховика");
+   // chartRoot->setProperty("chartTitle", "Динамика скорости маховика");
     chartRoot->setProperty("xAxisLabel", "Время (сек)");
     chartRoot->setProperty("yAxisLabel", "Скорость (об/мин)");
     chartRoot->setProperty("maxYValue", 10000);
