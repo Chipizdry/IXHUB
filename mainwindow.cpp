@@ -21,6 +21,9 @@
 extern DevicePoller* g_poller;
 extern ModbusMaster* g_master;
 
+// Глобальная переменная для хранения текущей скорости
+static int currentSpeed = 0;
+
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
     , ui(new Ui::MainWindow)
@@ -97,33 +100,36 @@ MainWindow::MainWindow(QWidget *parent)
     }
 
     // ========== 5. График для вкладки Статистика ==========
-
-    // Удаляем существующий layout
-    //delete statisticsTab->layout();
-
     QQuickWidget *chartWidget = new QQuickWidget(statisticsTab);
     chartWidget->setFixedSize(1020, 510);
     chartWidget->setResizeMode(QQuickWidget::SizeRootObjectToView);
     chartWidget->setSource(QUrl("qrc:/qml/ChartView.qml"));
 
     // Размещаем график по координатам (x, y)
-    chartWidget->move(00, 0);  // Задайте нужные координаты
+    chartWidget->move(0, 0);
 
-    // Настраиваем свойства графика
-    QObject *chartRoot = chartWidget->rootObject();
-    if (chartRoot) {
-        chartRoot->setProperty("chartTitle", "Динамика скорости маховика");
-        chartRoot->setProperty("xAxisLabel", "Время (сек)");
-        chartRoot->setProperty("yAxisLabel", "Скорость (об/мин)");
-        chartRoot->setProperty("maxYValue", 10000);
-        chartRoot->setProperty("minYValue", 0);
-    }
+    // Даем время на загрузку QML
+    QTimer::singleShot(500, [this, chartWidget]() {
+        // Настраиваем свойства графика
+        QObject *chartRoot = chartWidget->rootObject();
+        if (chartRoot) {
+            chartRoot->setProperty("chartTitle", "Динамика скорости маховика");
+            chartRoot->setProperty("xAxisLabel", "Время (сек)");
+            chartRoot->setProperty("yAxisLabel", "Скорость (об/мин)");
+            chartRoot->setProperty("maxYValue", 10000);
+            chartRoot->setProperty("minYValue", 0);
+            chartRoot->setProperty("maxDataPoints", 200);
+            chartRoot->setProperty("cyclicMode", true);
 
-    // ========== Таймер для тестирования с управлением от кнопки ==========
+            qDebug() << "✅ Chart configured successfully";
+        } else {
+            qDebug() << "❌ Failed to get chart root object";
+        }
+    });
+
+    // ========== Таймер для обновления индикаторов (быстрый) ==========
     QTimer *updateTimer = new QTimer(this);
-
-    // Захватываем chartWidget в лямбду
-    connect(updateTimer, &QTimer::timeout, [this, chartWidget]() {
+    connect(updateTimer, &QTimer::timeout, [this]() {
         // Проверяем состояние кнопки
         if (powerButtonWidget && powerButtonWidget->rootObject()) {
             bool isOn = powerButtonWidget->rootObject()->property("isOn").toBool();
@@ -146,37 +152,60 @@ MainWindow::MainWindow(QWidget *parent)
                 updatePower(power);
                 updateTorque(torque);
 
-                // Обновляем график
-                if (chartWidget && chartWidget->rootObject()) {
-                    // Получаем текущие точки
-                    QVariantList currentPoints = chartWidget->rootObject()->property("dataPoints").toList();
-
-                    // Создаем новую точку
-                    QVariantMap newPoint;
-                    newPoint["x"] = currentPoints.size();
-                    newPoint["y"] = speed;
-
-                    // Добавляем точку
-                    QVariantList newPoints = currentPoints;
-                    newPoints.append(newPoint);
-
-                    // Ограничиваем количество точек (150)
-                    if (newPoints.size() > 150) {
-                        newPoints.removeFirst();
-                    }
-
-                    // Обновляем график
-                    chartWidget->rootObject()->setProperty("dataPoints", newPoints);
-                }
+                // Сохраняем текущую скорость для графика
+                currentSpeed = speed;
             } else {
                 // Если выключено - сбрасываем все значения на ноль
                 updateSpeed(0);
                 updatePower(0);
                 updateTorque(0);
+                currentSpeed = 0;
             }
         }
     });
-    updateTimer->start(100);
+    updateTimer->start(100);  // Быстрый таймер для индикаторов
+
+    // ========== Таймер для графика (медленный, отдельный) ==========
+    QTimer *chartTimer = new QTimer(this);
+    connect(chartTimer, &QTimer::timeout, [this, chartWidget]() {
+        // Проверяем состояние кнопки
+        if (powerButtonWidget && powerButtonWidget->rootObject()) {
+            bool isOn = powerButtonWidget->rootObject()->property("isOn").toBool();
+
+            if (isOn && chartWidget && chartWidget->rootObject()) {
+                qDebug() << "⏰ Chart timer triggered, currentSpeed =" << currentSpeed;
+
+                // Пробуем вызвать метод addDataPoint
+                QObject *chartRoot = chartWidget->rootObject();
+
+                // Проверяем существование метода через metaObject
+                bool methodExists = false;
+                const QMetaObject *metaObj = chartRoot->metaObject();
+                for (int i = 0; i < metaObj->methodCount(); i++) {
+                    if (QString(metaObj->method(i).name()) == "addDataPoint") {
+                        methodExists = true;
+                        break;
+                    }
+                }
+
+                if (methodExists) {
+                    QMetaObject::invokeMethod(chartRoot, "addDataPoint",
+                        Q_ARG(QVariant, currentSpeed));
+                    qDebug() << "📊 Chart updated with speed:" << currentSpeed;
+                } else {
+                    qDebug() << "❌ Method addDataPoint not found in QML object";
+                    qDebug() << "Available methods:";
+                    for (int i = 0; i < metaObj->methodCount(); i++) {
+                        qDebug() << "  -" << metaObj->method(i).name();
+                    }
+                }
+            }
+        }
+    });
+    // Устанавливаем интервал обновления графика (например, 1 секунда = 1000 мс)
+    chartTimer->start(1000);  // Измените на нужное значение (1000 = 1 секунда)
+
+    qDebug() << "✅ Таймер графика запущен с интервалом 1000 мс";
 
     ui->tabWidget->tabBar()->setExpanding(true);
 }
