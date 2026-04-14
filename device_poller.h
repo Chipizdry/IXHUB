@@ -43,6 +43,7 @@ public:
 
     // НОВЫЙ МЕТОД: Отправка приоритетной команды (например, управление реле)
     void sendPriorityCommand(int slaveId, const QByteArray& command, const QString& commandName);
+    int getPollInterval() const { return m_pollInterval; }
 
 signals:
     void deviceDataReady(int slaveId, const QJsonObject& data);

@@ -33,10 +33,12 @@ SOURCES += \
     device.cpp \
     device_manager.cpp \
     device_poller.cpp \
+    logger.cpp \
     main.cpp \
     mainwindow.cpp \
     nta8a01_device.cpp \
-    relay_device.cpp
+    relay_device.cpp \
+    websocket_manager.cpp
 
 
 HEADERS += \
@@ -45,9 +47,11 @@ HEADERS += \
     device.h \
     device_manager.h \
     device_poller.h \
+    logger.h \
     mainwindow.h \
     nta8a01_device.h \
-    relay_device.h
+    relay_device.h \
+    websocket_manager.h
 
 FORMS += \
     mainwindow.ui
