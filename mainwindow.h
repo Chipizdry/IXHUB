@@ -11,7 +11,8 @@ QT_BEGIN_NAMESPACE
 namespace Ui { class MainWindow; }
 QT_END_NAMESPACE
 
-class RelayDevice;  // Forward declaration
+class RelayDevice;
+struct ChartData;
 
 class MainWindow : public QMainWindow
 {
@@ -21,29 +22,28 @@ public:
     MainWindow(QWidget *parent = nullptr);
     ~MainWindow();
 
-    // Публичные методы для обновления значений
+public slots:
+    void onPowerButtonToggled(bool state);
     void updateSpeed(int value);
     void updatePower(int value);
     void updateTorque(int value);
 
-public slots:
-    void onSpeedChanged(int value) { updateSpeed(value); }
-    void onPowerChanged(int value) { updatePower(value); }
-    void onTorqueChanged(int value) { updateTorque(value); }
-    void onPowerButtonToggled(bool state);
+private slots:
+    void initializeChart();
+    void updateIndicators();
+    void updateChart();
 
 private:
     Ui::MainWindow *ui;
-
-    // Указатели на виджеты
-    QQuickWidget *speedWidget = nullptr;
-    QQuickWidget *powerWidget = nullptr;
-    QQuickWidget *torqueWidget = nullptr;
-    QQuickWidget *powerButtonWidget = nullptr;
-
-    RelayDevice* m_relayDevice = nullptr;  // Указатель на реле
+    QQuickWidget *powerWidget;
+    QQuickWidget *speedWidget;
+    QQuickWidget *torqueWidget;
+    QQuickWidget *powerButtonWidget;
+    QQuickWidget *m_chartWidget;
+    RelayDevice *m_relayDevice;
+    ChartData *m_chartData;
 };
 
-#endif
+#endif // MAINWINDOW_H
 
 

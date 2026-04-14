@@ -1,6 +1,3 @@
-
-
-
 import QtQuick 2.12
 import QtQuick.Controls 2.12
 import QtQuick.Layouts 1.12
@@ -23,7 +20,8 @@ Rectangle {
         "Ток": { color: "#3498db", unit: "А", minY: 0, maxY: 100, visible: true, yAxis: "left" },
         "Ёмкость": { color: "#f39c12", unit: "Ач", minY: 0, maxY: 100, visible: false, yAxis: "right" },
         "Температура": { color: "#e74c3c", unit: "°C", minY: -20, maxY: 150, visible: false, yAxis: "right" },
-        "Напряжение": { color: "#9b59b6", unit: "В", minY: 0, maxY: 500, visible: false, yAxis: "right" }
+        "Напряжение": { color: "#9b59b6", unit: "В", minY: 0, maxY: 500, visible: false, yAxis: "right" },
+        "Мощность": { color: "#1abc9c", unit: "Вт", minY: 0, maxY: 10000, visible: true, yAxis: "left" }
     })
 
     // Диапазоны для левой и правой шкалы
@@ -37,6 +35,7 @@ Rectangle {
     // Общая шкала времени
     property variant timePoints: []
     property real startTime: 0
+    property bool isRealData: true  // Флаг реальных данных
 
     // Функция регистрации нового параметра
     function registerParameter(name, config) {
@@ -71,6 +70,7 @@ Rectangle {
         // Инициализируем временные метки
         if (Object.keys(parameters).length === 1 && parameters[parameterName].length === 0) {
             startTime = currentTime;
+            console.log("Chart started at time:", startTime);
         }
 
         var newPoint = {"x": currentTime - startTime, "y": value, "realTime": currentTime};
@@ -91,6 +91,16 @@ Rectangle {
         }
 
         canvas.requestPaint();
+    }
+
+    // Функция для добавления нескольких параметров одновременно
+    function addMultipleDataPoints(speed, current, power, temperature, voltage, capacity) {
+        if (speed !== undefined) addDataPoint("Обороты", speed);
+        if (current !== undefined) addDataPoint("Ток", current);
+        if (power !== undefined) addDataPoint("Мощность", power);
+        if (temperature !== undefined) addDataPoint("Температура", temperature);
+        if (voltage !== undefined) addDataPoint("Напряжение", voltage);
+        if (capacity !== undefined) addDataPoint("Ёмкость", capacity);
     }
 
     // Обновление шкал Y на основе данных
@@ -201,6 +211,17 @@ Rectangle {
         font.bold: true
     }
 
+    // Статус данных
+    Text {
+        anchors.top: parent.top
+        anchors.topMargin: 15
+        anchors.right: parent.right
+        anchors.rightMargin: 10
+        text: isRealData ? "🟢 Реальные данные" : "🔴 Тестовые данные"
+        color: isRealData ? "#2ecc71" : "#e74c3c"
+        font.pixelSize: 10
+    }
+
     // Панель управления параметрами
     Rectangle {
         id: controlPanel
@@ -209,7 +230,7 @@ Rectangle {
         anchors.left: parent.left
         anchors.leftMargin: 10
         width: 180
-        height: 300
+        height: 350
         color: "#0f3460"
         radius: 5
         border.color: "#3498db"
@@ -453,7 +474,7 @@ Rectangle {
                     }
                 }
 
-                // Горизонтальные линии левой шкалы
+                // Горизонтальные линии
                 var hLines = 5;
                 for (var i = 0; i <= hLines; i++) {
                     var yPos = (i / hLines) * height;
@@ -587,14 +608,9 @@ Rectangle {
     }
 
     Component.onCompleted: {
-        console.log("Multi-parameter chart loaded");
-
-        // Инициализируем тестовые данные для демонстрации
-        for (var i = 0; i < 50; i++) {
-            addDataPoint("Обороты", 3000 + Math.random() * 5000);
-            addDataPoint("Ток", 20 + Math.random() * 80);
-            addDataPoint("Температура", 30 + Math.random() * 120);
-        }
+        console.log("Multi-parameter chart loaded - Ready for real data");
+        isRealData = true;
+        // Не добавляем тестовые данные, ждем реальные от C++
     }
 }
 

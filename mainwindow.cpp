@@ -12,6 +12,8 @@
 #include <QTabBar>
 #include <QQuickItem>
 #include <QDebug>
+#include <QMetaMethod>
+#include <QMutex>
 #include "device_manager.h"
 #include "relay_device.h"
 #include "device_poller.h"
@@ -23,10 +25,29 @@ extern ModbusMaster* g_master;
 
 // Глобальная переменная для хранения текущей скорости
 static int currentSpeed = 0;
+static int currentPower = 0;
+static int currentTorque = 0;
+static int currentEfficiency = 0;
+static int currentEnergy = 0;
+static float currentCalculatedTemp = 0;
+static float currentCalculatedCapacity = 0;
+static float currentCalculatedVoltage = 0;
+
+// Мьютекс для потокобезопасности
+static QMutex dataMutex;
+
+// Структура для хранения данных графиков
+struct ChartData {
+    QObject* chartRoot;
+    QTimer* timer;
+    bool isInitialized;
+    QStringList availableMethods;
+};
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
     , ui(new Ui::MainWindow)
+    , m_chartData(nullptr)
 {
     ui->setupUi(this);
     // Устанавливаем вкладку "Информация" как активную по умолчанию
@@ -100,124 +121,232 @@ MainWindow::MainWindow(QWidget *parent)
     }
 
     // ========== 5. График для вкладки Статистика ==========
-    QQuickWidget *chartWidget = new QQuickWidget(statisticsTab);
-    chartWidget->setFixedSize(1020, 510);
-    chartWidget->setResizeMode(QQuickWidget::SizeRootObjectToView);
-    chartWidget->setSource(QUrl("qrc:/qml/ChartView.qml"));
+    m_chartWidget = new QQuickWidget(statisticsTab);
+    m_chartWidget->setFixedSize(1020, 510);
+    m_chartWidget->setResizeMode(QQuickWidget::SizeRootObjectToView);
+    m_chartWidget->setSource(QUrl("qrc:/qml/ChartView.qml"));
+    m_chartWidget->move(0, 0);
 
-    // Размещаем график по координатам (x, y)
-    chartWidget->move(0, 0);
+    // Инициализация структуры данных для графика
+    m_chartData = new ChartData();
+    m_chartData->chartRoot = nullptr;
+    m_chartData->timer = nullptr;
+    m_chartData->isInitialized = false;
 
-    // Даем время на загрузку QML
-    QTimer::singleShot(500, [this, chartWidget]() {
-        // Настраиваем свойства графика
-        QObject *chartRoot = chartWidget->rootObject();
-        if (chartRoot) {
-            chartRoot->setProperty("chartTitle", "Динамика скорости маховика");
-            chartRoot->setProperty("xAxisLabel", "Время (сек)");
-            chartRoot->setProperty("yAxisLabel", "Скорость (об/мин)");
-            chartRoot->setProperty("maxYValue", 10000);
-            chartRoot->setProperty("minYValue", 0);
-            chartRoot->setProperty("maxDataPoints", 200);
-            chartRoot->setProperty("cyclicMode", true);
-
-            qDebug() << "✅ Chart configured successfully";
-        } else {
-            qDebug() << "❌ Failed to get chart root object";
-        }
-    });
+    // Отложенная инициализация графика
+    QTimer::singleShot(500, this, &MainWindow::initializeChart);
 
     // ========== Таймер для обновления индикаторов (быстрый) ==========
     QTimer *updateTimer = new QTimer(this);
-    connect(updateTimer, &QTimer::timeout, [this]() {
-        // Проверяем состояние кнопки
-        if (powerButtonWidget && powerButtonWidget->rootObject()) {
-            bool isOn = powerButtonWidget->rootObject()->property("isOn").toBool();
-
-            if (isOn) {
-                // Только если включено - обновляем данные
-                static int speed = 0;
-                static int power = 0;
-                static int torque = 0;
-
-                speed += 50;
-                power += 50;
-                torque += 1;
-
-                if (speed > 10000) speed = 0;
-                if (power > 10000) power = 0;
-                if (torque > 20) torque = 0;
-
-                updateSpeed(speed);
-                updatePower(power);
-                updateTorque(torque);
-
-                // Сохраняем текущую скорость для графика
-                currentSpeed = speed;
-            } else {
-                // Если выключено - сбрасываем все значения на ноль
-                updateSpeed(0);
-                updatePower(0);
-                updateTorque(0);
-                currentSpeed = 0;
-            }
-        }
-    });
+    connect(updateTimer, &QTimer::timeout, this, &MainWindow::updateIndicators);
     updateTimer->start(100);  // Быстрый таймер для индикаторов
 
     // ========== Таймер для графика (медленный, отдельный) ==========
     QTimer *chartTimer = new QTimer(this);
-    connect(chartTimer, &QTimer::timeout, [this, chartWidget]() {
-        // Проверяем состояние кнопки
-        if (powerButtonWidget && powerButtonWidget->rootObject()) {
-            bool isOn = powerButtonWidget->rootObject()->property("isOn").toBool();
+    connect(chartTimer, &QTimer::timeout, this, &MainWindow::updateChart);
+    chartTimer->start(1000);  // Интервал обновления графика
 
-            if (isOn && chartWidget && chartWidget->rootObject()) {
-                qDebug() << "⏰ Chart timer triggered, currentSpeed =" << currentSpeed;
-
-                // Пробуем вызвать метод addDataPoint
-                QObject *chartRoot = chartWidget->rootObject();
-
-                // Проверяем существование метода через metaObject
-                bool methodExists = false;
-                const QMetaObject *metaObj = chartRoot->metaObject();
-                for (int i = 0; i < metaObj->methodCount(); i++) {
-                    if (QString(metaObj->method(i).name()) == "addDataPoint") {
-                        methodExists = true;
-                        break;
-                    }
-                }
-
-                if (methodExists) {
-                    QMetaObject::invokeMethod(chartRoot, "addDataPoint",
-                        Q_ARG(QVariant, currentSpeed));
-                    qDebug() << "📊 Chart updated with speed:" << currentSpeed;
-                } else {
-                    qDebug() << "❌ Method addDataPoint not found in QML object";
-                    qDebug() << "Available methods:";
-                    for (int i = 0; i < metaObj->methodCount(); i++) {
-                        qDebug() << "  -" << metaObj->method(i).name();
-                    }
-                }
-            }
-        }
-    });
-    // Устанавливаем интервал обновления графика (например, 1 секунда = 1000 мс)
-    chartTimer->start(1000);  // Измените на нужное значение (1000 = 1 секунда)
-
-    qDebug() << "✅ Таймер графика запущен с интервалом 1000 мс";
+    qDebug() << "✅ All timers started";
 
     ui->tabWidget->tabBar()->setExpanding(true);
 }
 
 MainWindow::~MainWindow()
 {
+    // Безопасное удаление
+    if (m_chartData) {
+        if (m_chartData->timer) {
+            m_chartData->timer->stop();
+            delete m_chartData->timer;
+        }
+        delete m_chartData;
+    }
     delete ui;
 }
+
+void MainWindow::initializeChart()
+{
+    if (!m_chartWidget) {
+        qDebug() << "❌ Chart widget is null";
+        return;
+    }
+
+    QObject *chartRoot = m_chartWidget->rootObject();
+    if (!chartRoot) {
+        qDebug() << "❌ Chart root object is null, retrying...";
+        QTimer::singleShot(500, this, &MainWindow::initializeChart);
+        return;
+    }
+
+    m_chartData->chartRoot = chartRoot;
+
+    // Настраиваем свойства графика
+    chartRoot->setProperty("chartTitle", "Динамика скорости маховика");
+    chartRoot->setProperty("xAxisLabel", "Время (сек)");
+    chartRoot->setProperty("yAxisLabel", "Скорость (об/мин)");
+    chartRoot->setProperty("maxYValue", 10000);
+    chartRoot->setProperty("minYValue", 0);
+    chartRoot->setProperty("maxDataPoints", 200);
+    chartRoot->setProperty("cyclicMode", true);
+
+    // Получаем список доступных методов
+    const QMetaObject *metaObj = chartRoot->metaObject();
+    for (int i = 0; i < metaObj->methodCount(); i++) {
+        QMetaMethod method = metaObj->method(i);
+        if (method.methodType() == QMetaMethod::Method) {
+            m_chartData->availableMethods << method.name();
+            qDebug() << "  📌 Method:" << method.name();
+        }
+    }
+
+    m_chartData->isInitialized = true;
+    qDebug() << "✅ Chart initialized successfully";
+    qDebug() << "   Available methods:" << m_chartData->availableMethods;
+
+    // Проверяем наличие метода addDataPoint
+    if (m_chartData->availableMethods.contains("addDataPoint")) {
+        qDebug() << "✅ addDataPoint method found";
+    } else {
+        qDebug() << "⚠️ addDataPoint method NOT found!";
+    }
+}
+
+
+
+void MainWindow::updateIndicators()
+{
+    QMutexLocker locker(&dataMutex);
+
+    if (!powerButtonWidget || !powerButtonWidget->rootObject()) {
+        return;
+    }
+
+    bool isOn = powerButtonWidget->rootObject()->property("isOn").toBool();
+
+    if (isOn) {
+        static int counter = 0;
+        counter++;
+
+        // Основные параметры
+        currentSpeed = 3000 + (counter % 70) * 100;
+        currentPower = (currentSpeed * 2.5);
+        currentTorque = 5 + (counter % 15);
+
+        // Вычисляемые параметры
+        currentEfficiency = (currentSpeed * currentTorque * 100) / (currentPower * 100);
+        if (currentEfficiency > 95) currentEfficiency = 95;
+
+        currentEnergy = (currentPower * counter) / 3600;
+        currentCalculatedTemp = 25.0 + (currentPower / 500.0);
+        currentCalculatedCapacity = (currentTorque * counter) / 3600.0;
+        if (currentCalculatedCapacity > 100) currentCalculatedCapacity = 100;
+        currentCalculatedVoltage = 220.0 - (currentTorque * 0.5);
+        if (currentCalculatedVoltage < 200) currentCalculatedVoltage = 200;
+
+        updateSpeed(currentSpeed);
+        updatePower(currentPower);
+        updateTorque(currentTorque);
+
+    } else {
+        currentSpeed = 0;
+        currentPower = 0;
+        currentTorque = 0;
+        currentEfficiency = 0;
+        currentEnergy = 0;
+        currentCalculatedTemp = 0;
+        currentCalculatedCapacity = 0;
+        currentCalculatedVoltage = 0;
+
+        updateSpeed(0);
+        updatePower(0);
+        updateTorque(0);
+    }
+}
+
+
+
+
+void MainWindow::updateChart()
+{
+    if (!m_chartData || !m_chartData->isInitialized) {
+        return;
+    }
+
+    if (!powerButtonWidget || !powerButtonWidget->rootObject()) {
+        return;
+    }
+
+    bool isOn = powerButtonWidget->rootObject()->property("isOn").toBool();
+
+    if (!isOn) {
+        return;
+    }
+
+    if (!m_chartData->chartRoot) {
+        return;
+    }
+
+    QMutexLocker locker(&dataMutex);
+
+    // Отправляем все параметры (и получаемые, и вычисляемые)
+    QMetaObject::invokeMethod(m_chartData->chartRoot, "addDataPoint",
+        Qt::AutoConnection,
+        Q_ARG(QVariant, QVariant("Обороты")),
+        Q_ARG(QVariant, currentSpeed));
+
+    QMetaObject::invokeMethod(m_chartData->chartRoot, "addDataPoint",
+        Qt::AutoConnection,
+        Q_ARG(QVariant, QVariant("Ток")),
+        Q_ARG(QVariant, currentTorque));
+
+    QMetaObject::invokeMethod(m_chartData->chartRoot, "addDataPoint",
+        Qt::AutoConnection,
+        Q_ARG(QVariant, QVariant("Мощность")),
+        Q_ARG(QVariant, currentPower));
+
+    QMetaObject::invokeMethod(m_chartData->chartRoot, "addDataPoint",
+        Qt::AutoConnection,
+        Q_ARG(QVariant, QVariant("КПД")),
+        Q_ARG(QVariant, currentEfficiency));
+
+    QMetaObject::invokeMethod(m_chartData->chartRoot, "addDataPoint",
+        Qt::AutoConnection,
+        Q_ARG(QVariant, QVariant("Энергия")),
+        Q_ARG(QVariant, currentEnergy));
+
+    QMetaObject::invokeMethod(m_chartData->chartRoot, "addDataPoint",
+        Qt::AutoConnection,
+        Q_ARG(QVariant, QVariant("Температура")),
+        Q_ARG(QVariant, currentCalculatedTemp));
+
+    QMetaObject::invokeMethod(m_chartData->chartRoot, "addDataPoint",
+        Qt::AutoConnection,
+        Q_ARG(QVariant, QVariant("Ёмкость")),
+        Q_ARG(QVariant, currentCalculatedCapacity));
+
+    QMetaObject::invokeMethod(m_chartData->chartRoot, "addDataPoint",
+        Qt::AutoConnection,
+        Q_ARG(QVariant, QVariant("Напряжение")),
+        Q_ARG(QVariant, currentCalculatedVoltage));
+
+    qDebug() << "📊 Chart updated - Speed:" << currentSpeed
+             << "Current:" << currentTorque
+             << "Power:" << currentPower
+             << "Efficiency:" << currentEfficiency
+             << "Energy:" << currentEnergy
+             << "Temp:" << currentCalculatedTemp;
+}
+
+
+
+
+
 
 void MainWindow::onPowerButtonToggled(bool state)
 {
     qDebug() << "🔘 Кнопка переключена:" << (state ? "ВКЛ" : "ВЫКЛ");
+
+    QMutexLocker locker(&dataMutex);
 
     if (m_relayDevice) {
         qDebug() << "📡 Отправляем команду на реле 1:" << (state ? "ON" : "OFF");
@@ -239,8 +368,17 @@ void MainWindow::onPowerButtonToggled(bool state)
 
     if (state) {
         qDebug() << "✅ Система активирована, реле 1 включено";
+        // Сбрасываем счетчики при включении
+        currentSpeed = 0;
+        currentPower = 0;
+        currentTorque = 0;
     } else {
         qDebug() << "✅ Система деактивирована, реле 1 выключено";
+        // При выключении очищаем график
+        if (m_chartData && m_chartData->chartRoot && m_chartData->availableMethods.contains("clearChart")) {
+            QMetaObject::invokeMethod(m_chartData->chartRoot, "clearChart", Qt::AutoConnection);
+            qDebug() << "🧹 Chart cleared";
+        }
     }
 }
 
