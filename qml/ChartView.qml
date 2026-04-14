@@ -1,3 +1,6 @@
+
+
+
 import QtQuick 2.12
 import QtQuick.Controls 2.12
 import QtQuick.Layouts 1.12
@@ -36,6 +39,14 @@ Rectangle {
     property variant timePoints: []
     property real startTime: 0
     property bool isRealData: true  // Флаг реальных данных
+
+    // Свойства для панели управления
+    property bool panelVisible: true
+    property real panelX: 10
+    property real panelY: 45
+    property bool isDragging: false
+    property real dragStartX: 0
+    property real dragStartY: 0
 
     // Функция регистрации нового параметра
     function registerParameter(name, config) {
@@ -222,22 +233,160 @@ Rectangle {
         font.pixelSize: 10
     }
 
-    // Панель управления параметрами
-    Rectangle {
-        id: controlPanel
+    // Кнопка показа/скрытия панели
+    Button {
+        id: togglePanelButton
         anchors.top: parent.top
         anchors.topMargin: 45
         anchors.left: parent.left
         anchors.leftMargin: 10
-        width: 180
-        height: 350
+        width: 30
+        height: 30
+        z: 20
+
+        background: Rectangle {
+            color: panelVisible ? "#e74c3c" : "#27ae60"
+            radius: 5
+            border.color: "#3498db"
+            border.width: 1
+        }
+
+        contentItem: Text {
+            text: panelVisible ? "◀" : "▶"
+            color: "white"
+            font.bold: true
+            font.pixelSize: 16
+            horizontalAlignment: Text.AlignHCenter
+            verticalAlignment: Text.AlignVCenter
+        }
+
+        onClicked: {
+            panelVisible = !panelVisible;
+            if (panelVisible) {
+                // При показе возвращаем на сохраненную позицию
+                controlPanel.x = panelX;
+                controlPanel.y = panelY;
+            }
+        }
+    }
+
+    // Перемещаемая панель управления параметрами
+    Rectangle {
+        id: controlPanel
+        x: panelVisible ? panelX : -200  // Скрываем за левый край
+        y: panelY
+        width: 200
+        height: 400
         color: "#0f3460"
         radius: 5
         border.color: "#3498db"
-        border.width: 1
+        border.width: 2
+        z: 15
+        opacity: panelVisible ? 1 : 0
+        Behavior on x { PropertyAnimation { duration: 200 } }
+        Behavior on opacity { PropertyAnimation { duration: 200 } }
 
+        // Заголовок панели с возможностью перетаскивания
+        Rectangle {
+            id: panelHeader
+            width: parent.width
+            height: 30
+            color: "#1a1a2e"
+            radius: 5
+            border.color: "#3498db"
+            border.width: 1
+
+            Text {
+                text: "☰ Управление параметрами"
+                color: "white"
+                font.pixelSize: 11
+                font.bold: true
+                anchors.centerIn: parent
+            }
+
+            // Индикатор перетаскивания
+            Rectangle {
+                width: 40
+                height: 3
+                radius: 2
+                color: "#3498db"
+                anchors.bottom: parent.bottom
+                anchors.bottomMargin: 5
+                anchors.horizontalCenter: parent.horizontalCenter
+            }
+
+            // Обработка перетаскивания
+            MouseArea {
+                id: dragArea
+                anchors.fill: parent
+                cursorShape: Qt.SizeAllCursor
+
+                onPressed: {
+                    isDragging = true;
+                    dragStartX = mouseX;
+                    dragStartY = mouseY;
+                    parent.parent.z = 20; // Поднимаем панель при перетаскивании
+                }
+
+                onPositionChanged: {
+                    if (isDragging) {
+                        var newX = controlPanel.x + (mouseX - dragStartX);
+                        var newY = controlPanel.y + (mouseY - dragStartY);
+
+                        // Ограничиваем перемещение в пределах родителя
+                        newX = Math.max(0, Math.min(chartContainer.width - controlPanel.width, newX));
+                        newY = Math.max(45, Math.min(chartContainer.height - controlPanel.height, newY));
+
+                        controlPanel.x = newX;
+                        controlPanel.y = newY;
+
+                        // Сохраняем позицию
+                        panelX = controlPanel.x;
+                        panelY = controlPanel.y;
+                    }
+                }
+
+                onReleased: {
+                    isDragging = false;
+                    parent.parent.z = 15;
+                }
+            }
+        }
+
+        // Кнопка закрытия панели
+        Button {
+            anchors.top: parent.top
+            anchors.topMargin: 5
+            anchors.right: parent.right
+            anchors.rightMargin: 5
+            width: 20
+            height: 20
+            z: 25
+
+            background: Rectangle {
+                color: parent.pressed ? "#c0392b" : "#e74c3c"
+                radius: 3
+            }
+
+            contentItem: Text {
+                text: "✕"
+                color: "white"
+                font.pixelSize: 12
+                horizontalAlignment: Text.AlignHCenter
+                verticalAlignment: Text.AlignVCenter
+            }
+
+            onClicked: {
+                panelVisible = false;
+            }
+        }
+
+        // Содержимое панели
         ScrollView {
-            anchors.fill: parent
+            anchors.top: panelHeader.bottom
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.bottom: parent.bottom
             anchors.margins: 5
             clip: true
 
@@ -251,6 +400,64 @@ Rectangle {
                     font.bold: true
                     font.pixelSize: 12
                     Layout.alignment: Qt.AlignHCenter
+                }
+
+                // Кнопка быстрого управления всеми параметрами
+                RowLayout {
+                    spacing: 5
+                    Layout.fillWidth: true
+
+                    Button {
+                        text: "Показать все"
+                        height: 25
+                        Layout.fillWidth: true
+                        background: Rectangle {
+                            color: parent.pressed ? "#2980b9" : "#3498db"
+                            radius: 3
+                        }
+                        contentItem: Text {
+                            text: parent.text
+                            color: "white"
+                            font.pixelSize: 10
+                            horizontalAlignment: Text.AlignHCenter
+                        }
+                        onClicked: {
+                            for (var name in parameterConfig) {
+                                parameterConfig[name].visible = true;
+                            }
+                            updateYScales();
+                            canvas.requestPaint();
+                        }
+                    }
+
+                    Button {
+                        text: "Скрыть все"
+                        height: 25
+                        Layout.fillWidth: true
+                        background: Rectangle {
+                            color: parent.pressed ? "#c0392b" : "#e74c3c"
+                            radius: 3
+                        }
+                        contentItem: Text {
+                            text: parent.text
+                            color: "white"
+                            font.pixelSize: 10
+                            horizontalAlignment: Text.AlignHCenter
+                        }
+                        onClicked: {
+                            for (var name in parameterConfig) {
+                                parameterConfig[name].visible = false;
+                            }
+                            canvas.requestPaint();
+                        }
+                    }
+                }
+
+                Rectangle {
+                    height: 1
+                    Layout.fillWidth: true
+                    color: "#3498db"
+                    opacity: 0.5
                 }
 
                 Repeater {
@@ -301,6 +508,7 @@ Rectangle {
                                 color: "white"
                                 font.pixelSize: 10
                                 font.bold: true
+                                Layout.fillWidth: true
                             }
 
                             Text {
@@ -315,15 +523,31 @@ Rectangle {
                             visible: parameterConfig[modelData].visible
 
                             Text {
-                                text: "Y:"
+                                text: "Ось Y:"
                                 color: "#a5a5a5"
                                 font.pixelSize: 8
                             }
 
-                            Text {
-                                text: parameterConfig[modelData].yAxis === "left" ? "←" : "→"
-                                color: parameterConfig[modelData].yAxis === "left" ? "#00cc00" : "#f39c12"
-                                font.pixelSize: 10
+                            Button {
+                                text: parameterConfig[modelData].yAxis === "left" ? "← Левая" : "→ Правая"
+                                height: 20
+                                Layout.fillWidth: true
+                                background: Rectangle {
+                                    color: parent.pressed ? "#2980b9" : "#34495e"
+                                    radius: 3
+                                }
+                                contentItem: Text {
+                                    text: parent.text
+                                    color: "white"
+                                    font.pixelSize: 8
+                                    horizontalAlignment: Text.AlignHCenter
+                                }
+                                onClicked: {
+                                    parameterConfig[modelData].yAxis =
+                                        parameterConfig[modelData].yAxis === "left" ? "right" : "left";
+                                    updateYScales();
+                                    canvas.requestPaint();
+                                }
                             }
 
                             Button {
