@@ -30,6 +30,7 @@ DEFINES += QT_DEPRECATED_WARNINGS
 SOURCES += \
     ModbusMaster.cpp \
     WSClient.cpp \
+    bldc_driver_device.cpp \
     device.cpp \
     device_manager.cpp \
     device_poller.cpp \
@@ -44,6 +45,7 @@ SOURCES += \
 HEADERS += \
     ModbusMaster.h \
     WSClient.h \
+    bldc_driver_device.h \
     device.h \
     device_manager.h \
     device_poller.h \

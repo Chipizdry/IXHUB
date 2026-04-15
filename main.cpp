@@ -7,6 +7,7 @@
 #include "device_poller.h"
 #include "nta8a01_device.h"
 #include "relay_device.h"
+#include "bldc_driver_device.h"
 #include "websocket_manager.h"
 #include "logger.h"
 #include <QApplication>
@@ -43,7 +44,7 @@ QString getCpuSerialNumber() {
 
 void setupDefaultDevices() {
     auto& dm = DeviceManager::instance();
-
+    dm.addDevice(new BldcDriverDevice(2));
     dm.addDevice(new NTA8A01Device(3));
     dm.addDevice(new NTA8A01Device(4));
     dm.addDevice(new NTA8A01Device(5));
@@ -87,7 +88,7 @@ int main(int argc, char *argv[])
     }
 
     // Запуск опроса устройств
-    poller.start(80);
+    poller.start(30);
     Logger::debug("Device poller started with interval 80ms");
 
     // Запуск главного окна

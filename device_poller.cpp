@@ -222,6 +222,32 @@ QList<PollTask> DevicePoller::generateTasksForDevice(Device* device)
             }
             break;
         }
+
+
+        case Device::TYPE_BLDC_DRIVER:
+        {
+            // Для BLDC драйвера - читаем все 5 регистров
+            QList<quint16> registers = device->getRegisterAddresses();
+            if (!registers.isEmpty()) {
+                quint16 startReg = registers.first();
+                quint16 numRegs = registers.size();
+
+                QByteArray command;
+                command.append(static_cast<char>(slaveId));
+                command.append(static_cast<char>(0x03));  // Read Holding Registers
+                command.append(static_cast<char>(startReg >> 8));
+                command.append(static_cast<char>(startReg & 0xFF));
+                command.append(static_cast<char>(numRegs >> 8));
+                command.append(static_cast<char>(numRegs & 0xFF));
+
+                command = Device::appendCRC(command);
+
+                tasks.append(PollTask(slaveId, command, "ReadRegisters", 0));
+            }
+            break;
+        }
+
+
         default:
             qDebug() << "Unknown device type:" << type << "for slave" << slaveId;
             break;
