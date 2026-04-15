@@ -6,6 +6,8 @@
 #include "device.h"
 #include "relay_device.h"
 #include "nta8a01_device.h"
+#include "bldc_driver_device.h"
+#include "vacuum_pressure_sensor.h"
 #include <QDebug>
 #include <QDateTime>
 
@@ -247,6 +249,24 @@ QList<PollTask> DevicePoller::generateTasksForDevice(Device* device)
             break;
         }
 
+        case Device::TYPE_VACUUM_SENSOR:
+        {
+            VacuumPressureSensor* sensor = static_cast<VacuumPressureSensor*>(device);
+
+            // Задача 0: Чтение PV значения (давления)
+            QByteArray pvCmd = sensor->generateReadPvValueCommand();
+            if (!pvCmd.isEmpty()) {
+                tasks.append(PollTask(slaveId, pvCmd, "ReadPressure", 0));
+            }
+
+            // Задача 1: Чтение конфигурации (единицы, десятичные знаки)
+            QByteArray configCmd = sensor->generateReadConfigCommand();
+            if (!configCmd.isEmpty()) {
+                tasks.append(PollTask(slaveId, configCmd, "ReadConfig", 1));
+            }
+            break;
+        }
+
 
         default:
             qDebug() << "Unknown device type:" << type << "for slave" << slaveId;
@@ -305,7 +325,7 @@ void DevicePoller::processNextTask()
 
     m_isWaiting = true;
     m_pollTimer->stop();
-    m_timeoutTimer->start(1000);  // 1 секунда таймаут
+    m_timeoutTimer->start(500);  // 0.5 секунды таймаут
 
     sendCommand(m_currentTask);
 }

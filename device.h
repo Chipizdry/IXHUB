@@ -17,6 +17,7 @@ public:
         TYPE_NTA8A01,      // Датчик температуры
         TYPE_RELAY,
         TYPE_BLDC_DRIVER,
+        TYPE_VACUUM_SENSOR,
         TYPE_UNKNOWN
     };
     Q_ENUM(DeviceType)

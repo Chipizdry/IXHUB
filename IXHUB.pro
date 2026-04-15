@@ -39,6 +39,7 @@ SOURCES += \
     mainwindow.cpp \
     nta8a01_device.cpp \
     relay_device.cpp \
+    vacuum_pressure_sensor.cpp \
     websocket_manager.cpp
 
 
@@ -53,6 +54,7 @@ HEADERS += \
     mainwindow.h \
     nta8a01_device.h \
     relay_device.h \
+    vacuum_pressure_sensor.h \
     websocket_manager.h
 
 FORMS += \
