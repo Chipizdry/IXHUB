@@ -1,15 +1,16 @@
 
 
 
-
 #ifndef MAINWINDOW_H
 #define MAINWINDOW_H
 
 #include <QMainWindow>
 #include <QQuickWidget>
 #include <QTimer>
+#include <QElapsedTimer>
 
 class RelayDevice;
+class BldcDriverDevice;
 
 QT_BEGIN_NAMESPACE
 namespace Ui { class MainWindow; }
@@ -35,40 +36,37 @@ private slots:
     void onStartupTimerTimeout();
     void checkRelayStatus();
     void onRelayStateChanged(const QString& relayName, bool state);
-
-    // НОВЫЙ СЛОТ ДЛЯ ОТПРАВКИ КОМАНД
     void onRelayCommandGenerated(const QByteArray& command);
+
+    // Слоты для BLDC драйвера
+    void onBldcCommandGenerated(const QByteArray& command);
+    void onBldcDataUpdated();
 
 private:
     void updateSpeed(int value);
     void updatePower(int value);
     void updateTorque(int value);
 
-    // Вспомогательные методы
     void setButtonBlinking(bool blinking, bool finalState = false);
     void sendRelayCommand(const QString& relayName, bool state);
     void startRelaySequence();
 
     Ui::MainWindow *ui;
 
-    // Виджеты
     QQuickWidget *powerWidget;
     QQuickWidget *speedWidget;
     QQuickWidget *torqueWidget;
     QQuickWidget *powerButtonWidget;
     QQuickWidget *m_chartWidget;
 
-    // Устройства
     RelayDevice *m_relayDevice;
+    BldcDriverDevice *m_bldcDevice;
 
-    // Данные для графика
     ChartData *m_chartData;
 
-    // Таймеры
     QTimer *m_startupTimer;
     QTimer *m_statusCheckTimer;
 
-    // Состояния
     bool m_isStarting;
     int m_currentStep;
 };

@@ -29,8 +29,8 @@ BldcDriverDevice::~BldcDriverDevice()
 
 QList<quint16> BldcDriverDevice::getRegisterAddresses()
 {
-    // Читаем 5 регистров: 0x0000, 0x0001, 0x0002, 0x0003, 0x0004
-    return {REG_PWM_KHZ, REG_PWM_HZ, REG_RPM, REG_TIMER_ARR, REG_PWM_VALUE};
+    // Читаем регистры: 0x0000, 0x0001, 0x0002, 0x0003, 0x0004,0x0005,0x0006,0x0007
+    return {REG_PWM_KHZ, REG_PWM_KHZ, REG_RPM, REG_TIMER_ARR, REG_PWM_VALUE,REG_ANGLE_PHAZE};
 }
 
 // ==================== ГЕНЕРАЦИЯ КОМАНД ====================
@@ -148,10 +148,13 @@ void BldcDriverDevice::parseHoldingRegisters(const QByteArray& data)
                     .arg(m_rpm)
                     .arg(m_timerArr)
                     .arg(m_pwmValue);
+          emit dataUpdated();
+
     } else if (regData.size() >= 2) {
         // Только один регистр (например, только RPM)
         m_rpm = (static_cast<quint8>(regData[0]) << 8) | static_cast<quint8>(regData[1]);
         qDebug() << QString("BLDC Slave %1: RPM=%2").arg(m_slaveId).arg(m_rpm);
+          emit dataUpdated();
     } else {
         qDebug() << "BldcDriverDevice: Invalid register data size:" << regData.size();
     }

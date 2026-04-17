@@ -16,6 +16,7 @@
 #include <QMutex>
 #include "device_manager.h"
 #include "relay_device.h"
+#include "bldc_driver_device.h"
 #include "device_poller.h"
 #include "ModbusMaster.h"
 
@@ -23,7 +24,7 @@
 extern DevicePoller* g_poller;
 extern ModbusMaster* g_master;
 
-// Глобальная переменная для хранения текущей скорости
+// Глобальная переменная для хранения текущей скорости (из драйвера)
 static int currentSpeed = 0;
 static int currentPower = 0;
 static int currentTorque = 0;
@@ -52,6 +53,7 @@ MainWindow::MainWindow(QWidget *parent)
     , m_statusCheckTimer(nullptr)
     , m_isStarting(false)
     , m_currentStep(0)
+    , m_bldcDevice(nullptr)
 {
     ui->setupUi(this);
     // Устанавливаем вкладку "Информация" как активную по умолчанию
@@ -73,13 +75,27 @@ MainWindow::MainWindow(QWidget *parent)
         qDebug() << "⚠️ Relay device with address 1 not found!";
     } else {
         qDebug() << "✅ Relay device found";
-        // Подключаемся к сигналу изменения состояния реле
         connect(m_relayDevice, &RelayDevice::relayStateChangedByName,
                 this, &MainWindow::onRelayStateChanged);
-
-        // ========== ВАЖНО: Подключаем сигнал команд к поллеру ==========
         connect(m_relayDevice, &RelayDevice::commandGenerated,
                 this, &MainWindow::onRelayCommandGenerated);
+    }
+
+    // ========== Находим BLDC драйвер (адрес 2) ==========
+    m_bldcDevice = dynamic_cast<BldcDriverDevice*>(
+        DeviceManager::instance().getDevice(2)
+    );
+
+    if (!m_bldcDevice) {
+        qDebug() << "⚠️ BLDC driver with address 2 not found!";
+    } else {
+        qDebug() << "✅ BLDC driver found";
+        // Подключаемся к сигналу обновления данных от драйвера
+        connect(m_bldcDevice, &BldcDriverDevice::dataUpdated,
+                this, &MainWindow::onBldcDataUpdated);
+        // Также подключаем сигнал команд
+        connect(m_bldcDevice, &BldcDriverDevice::commandGenerated,
+                this, &MainWindow::onBldcCommandGenerated);
     }
 
     // ========== Инициализация таймеров ==========
@@ -98,7 +114,7 @@ MainWindow::MainWindow(QWidget *parent)
 
     QQmlContext *powerContext = powerWidget->rootContext();
     powerContext->setContextProperty("gaugeLabel", "Мощность");
-    powerContext->setContextProperty("gaugeUnit", "Вт/Час");
+    powerContext->setContextProperty("gaugeUnit", "Вт");
     powerContext->setContextProperty("gaugeMinValue", 0);
     powerContext->setContextProperty("gaugeMaxValue", 10000);
 
@@ -174,11 +190,9 @@ MainWindow::MainWindow(QWidget *parent)
 
 MainWindow::~MainWindow()
 {
-    // Останавливаем таймеры
     if (m_startupTimer) m_startupTimer->stop();
     if (m_statusCheckTimer) m_statusCheckTimer->stop();
 
-    // Безопасное удаление
     if (m_chartData) {
         if (m_chartData->timer) {
             m_chartData->timer->stop();
@@ -205,7 +219,6 @@ void MainWindow::initializeChart()
 
     m_chartData->chartRoot = chartRoot;
 
-    // Настраиваем свойства графика
     chartRoot->setProperty("xAxisLabel", "Время (сек)");
     chartRoot->setProperty("yAxisLabel", "Скорость (об/мин)");
     chartRoot->setProperty("maxYValue", 10000);
@@ -213,7 +226,6 @@ void MainWindow::initializeChart()
     chartRoot->setProperty("maxDataPoints", 200);
     chartRoot->setProperty("cyclicMode", true);
 
-    // Получаем список доступных методов
     const QMetaObject *metaObj = chartRoot->metaObject();
     for (int i = 0; i < metaObj->methodCount(); i++) {
         QMetaMethod method = metaObj->method(i);
@@ -225,9 +237,7 @@ void MainWindow::initializeChart()
 
     m_chartData->isInitialized = true;
     qDebug() << "✅ Chart initialized successfully";
-    qDebug() << "   Available methods:" << m_chartData->availableMethods;
 
-    // Проверяем наличие метода addDataPoint
     if (m_chartData->availableMethods.contains("addDataPoint")) {
         qDebug() << "✅ addDataPoint method found";
     } else {
@@ -255,7 +265,7 @@ void MainWindow::setButtonBlinking(bool blinking, bool finalState)
     }
 }
 
-// ==================== НОВЫЙ СЛОТ ДЛЯ ОТПРАВКИ КОМАНД ====================
+// ==================== ОБРАБОТКА КОМАНД РЕЛЕ ====================
 
 void MainWindow::onRelayCommandGenerated(const QByteArray& command)
 {
@@ -272,8 +282,6 @@ void MainWindow::onRelayCommandGenerated(const QByteArray& command)
     }
 }
 
-// ==================== ОТПРАВКА КОМАНД ====================
-
 void MainWindow::sendRelayCommand(const QString& relayName, bool state)
 {
     if (!m_relayDevice) {
@@ -285,6 +293,85 @@ void MainWindow::sendRelayCommand(const QString& relayName, bool state)
     m_relayDevice->setRelayByName(relayName, state);
 }
 
+// ==================== ОБРАБОТКА КОМАНД BLDC ====================
+
+void MainWindow::onBldcCommandGenerated(const QByteArray& command)
+{
+    qDebug() << "📤 BLDC command generated, sending to poller...";
+
+    if (g_poller) {
+        g_poller->sendPriorityCommand(2, command, "BLDCCommand");
+        qDebug() << "✅ BLDC command sent to poller";
+    } else if (g_master) {
+        g_master->sendRawData(2, command);
+        qDebug() << "✅ BLDC command sent directly to Modbus";
+    } else {
+        qDebug() << "❌ No Modbus master available!";
+    }
+}
+
+void MainWindow::onBldcDataUpdated()
+{
+    if (!m_bldcDevice) return;
+
+    QMutexLocker locker(&dataMutex);
+
+    // Получаем реальные обороты из драйвера
+    currentSpeed = m_bldcDevice->getRpm();
+
+    // Рассчитываем мощность по формуле (примерная зависимость)
+    // P (Вт) = (обороты * крутящий момент) / 9550
+    // Для примера используем приблизительный расчет
+    currentPower = currentSpeed * 2.5;
+    if (currentPower > 10000) currentPower = 10000;
+
+    // Рассчитываем ток (А) = мощность / напряжение
+    // Напряжение ~ 220В
+    currentTorque = currentPower / 220;
+    if (currentTorque > 20) currentTorque = 20;
+
+    // КПД (упрощенный расчет)
+    if (currentSpeed > 0) {
+        currentEfficiency = 75 + (currentSpeed / 100);
+        if (currentEfficiency > 95) currentEfficiency = 95;
+    } else {
+        currentEfficiency = 0;
+    }
+
+    // Накопленная энергия (Вт*ч)
+    static int lastSpeed = 0;
+    static QElapsedTimer energyTimer;
+    if (!energyTimer.isValid()) {
+        energyTimer.start();
+    } else {
+        qint64 elapsedMs = energyTimer.restart();
+        double hours = elapsedMs / 3600000.0;
+        currentEnergy += currentPower * hours;
+        if (currentEnergy > 100000) currentEnergy = 100000;
+    }
+
+    // Расчетная температура
+    currentCalculatedTemp = 25.0 + (currentPower / 500.0);
+    if (currentCalculatedTemp > 80) currentCalculatedTemp = 80;
+
+    // Расчетная емкость
+    currentCalculatedCapacity = (currentTorque * (currentSpeed / 1000)) / 10;
+    if (currentCalculatedCapacity > 100) currentCalculatedCapacity = 100;
+
+    // Расчетное напряжение
+    currentCalculatedVoltage = 220.0 - (currentTorque * 0.5);
+    if (currentCalculatedVoltage < 200) currentCalculatedVoltage = 200;
+
+    qDebug() << "🔄 BLDC Data Updated - RPM:" << currentSpeed
+             << "Power:" << currentPower
+             << "Current:" << currentTorque;
+
+    // Обновляем спидометр
+    updateSpeed(currentSpeed);
+    updatePower(currentPower);
+    updateTorque(currentTorque);
+}
+
 // ==================== ПОСЛЕДОВАТЕЛЬНОСТЬ ВКЛЮЧЕНИЯ ====================
 
 void MainWindow::startRelaySequence()
@@ -293,24 +380,15 @@ void MainWindow::startRelaySequence()
     m_isStarting = true;
     m_currentStep = 0;
 
-    // Включаем мигание кнопки
     setButtonBlinking(true, false);
-
-    // Шаг 1: Включаем балластный резистор
     sendRelayCommand("Ballast_Resistor", true);
-
-    // Запускаем таймер на 3 секунды для следующего шага
     m_startupTimer->start(3000);
 }
 
 void MainWindow::onStartupTimerTimeout()
 {
     qDebug() << "⏰ Timer timeout, turning on Main Power...";
-
-    // Шаг 2: Включаем основное питание
     sendRelayCommand("Main_Power", true);
-
-    // Запускаем проверку статуса через 500 мс
     m_statusCheckTimer->start(500);
 }
 
@@ -325,25 +403,24 @@ void MainWindow::checkRelayStatus()
         return;
     }
 
-    // Проверяем состояние реле по именам
     bool ballastOn = m_relayDevice->getRelayStateByName("Ballast_Resistor");
     bool mainPowerOn = m_relayDevice->getRelayStateByName("Main_Power");
 
     qDebug() << "  Ballast_Resistor:" << (ballastOn ? "ON" : "OFF");
     qDebug() << "  Main_Power:" << (mainPowerOn ? "ON" : "OFF");
 
-    // Проверяем, что оба реле включены
     if (ballastOn && mainPowerOn) {
         qDebug() << "✅ Both relays are ON! Starting system...";
-
-        // Останавливаем мигание и устанавливаем зеленый цвет
         setButtonBlinking(false, true);
         m_isStarting = false;
 
-        // Сбрасываем счетчики
-        currentSpeed = 0;
-        currentPower = 0;
-        currentTorque = 0;
+        // Включаем питание BLDC драйвера
+        if (m_bldcDevice) {
+            qDebug() << "🔌 Turning on BLDC driver power...";
+            m_bldcDevice->setPowerOn(true);
+            // Запрашиваем чтение данных с драйвера
+            m_bldcDevice->readAllRegisters();
+        }
 
         qDebug() << "✅ System activated successfully";
     } else {
@@ -356,18 +433,21 @@ void MainWindow::onRelayStateChanged(const QString& relayName, bool state)
 {
     qDebug() << "📢 Relay state changed:" << relayName << "->" << (state ? "ON" : "OFF");
 
-    // Если система в процессе запуска и оба реле включены - завершаем запуск
-    if (m_isStarting) {
-        if (m_relayDevice) {
-            bool ballastOn = m_relayDevice->getRelayStateByName("Ballast_Resistor");
-            bool mainPowerOn = m_relayDevice->getRelayStateByName("Main_Power");
+    if (m_isStarting && m_relayDevice) {
+        bool ballastOn = m_relayDevice->getRelayStateByName("Ballast_Resistor");
+        bool mainPowerOn = m_relayDevice->getRelayStateByName("Main_Power");
 
-            if (ballastOn && mainPowerOn) {
-                qDebug() << "✅ Both relays detected ON via signal!";
-                setButtonBlinking(false, true);
-                m_isStarting = false;
-                if (m_statusCheckTimer) m_statusCheckTimer->stop();
-                if (m_startupTimer) m_startupTimer->stop();
+        if (ballastOn && mainPowerOn) {
+            qDebug() << "✅ Both relays detected ON via signal!";
+            setButtonBlinking(false, true);
+            m_isStarting = false;
+            if (m_statusCheckTimer) m_statusCheckTimer->stop();
+            if (m_startupTimer) m_startupTimer->stop();
+
+            // Включаем питание BLDC драйвера
+            if (m_bldcDevice) {
+                m_bldcDevice->setPowerOn(true);
+                m_bldcDevice->readAllRegisters();
             }
         }
     }
@@ -380,23 +460,24 @@ void MainWindow::onPowerButtonToggled(bool state)
     qDebug() << "🔘 Button toggled:" << (state ? "ON" : "OFF");
 
     if (state) {
-        // ВКЛЮЧЕНИЕ - запускаем последовательность
         if (!m_isStarting) {
             startRelaySequence();
         } else {
             qDebug() << "⚠️ System is already starting, please wait...";
-            // Возвращаем кнопку в исходное состояние
             if (powerButtonWidget && powerButtonWidget->rootObject()) {
                 powerButtonWidget->rootObject()->setProperty("isOn", false);
             }
         }
     } else {
-        // ВЫКЛЮЧЕНИЕ - мгновенно отключаем всё
         qDebug() << "🛑 Shutting down system immediately...";
 
-        // Останавливаем все таймеры
         if (m_startupTimer) m_startupTimer->stop();
         if (m_statusCheckTimer) m_statusCheckTimer->stop();
+
+        // Отключаем BLDC драйвер
+        if (m_bldcDevice) {
+            m_bldcDevice->setPowerOn(false);
+        }
 
         // Отключаем реле
         if (m_relayDevice) {
@@ -404,25 +485,26 @@ void MainWindow::onPowerButtonToggled(bool state)
             sendRelayCommand("Main_Power", false);
         }
 
-        // Останавливаем мигание и устанавливаем красный цвет
         setButtonBlinking(false, false);
         m_isStarting = false;
 
-        // Очищаем график
         if (m_chartData && m_chartData->chartRoot && m_chartData->availableMethods.contains("clearChart")) {
             QMetaObject::invokeMethod(m_chartData->chartRoot, "clearChart", Qt::AutoConnection);
             qDebug() << "🧹 Chart cleared";
         }
 
         // Обнуляем показатели
-        currentSpeed = 0;
-        currentPower = 0;
-        currentTorque = 0;
-        currentEfficiency = 0;
-        currentEnergy = 0;
-        currentCalculatedTemp = 0;
-        currentCalculatedCapacity = 0;
-        currentCalculatedVoltage = 0;
+        {
+            QMutexLocker locker(&dataMutex);
+            currentSpeed = 0;
+            currentPower = 0;
+            currentTorque = 0;
+            currentEfficiency = 0;
+            currentEnergy = 0;
+            currentCalculatedTemp = 0;
+            currentCalculatedCapacity = 0;
+            currentCalculatedVoltage = 0;
+        }
 
         updateSpeed(0);
         updatePower(0);
@@ -445,45 +527,11 @@ void MainWindow::updateIndicators()
     bool isOn = powerButtonWidget->rootObject()->property("isOn").toBool();
     bool isBlinking = powerButtonWidget->rootObject()->property("isBlinking").toBool();
 
-    // Обновляем индикаторы только если система полностью запущена (не мигает)
+    // Индикаторы обновляются из данных драйвера в onBldcDataUpdated()
+    // Здесь только обновляем дополнительные параметры
     if (isOn && !isBlinking) {
-        static int counter = 0;
-        counter++;
-
-        // Основные параметры
-        currentSpeed = 3000 + (counter % 70) * 100;
-        currentPower = (currentSpeed * 2.5);
-        currentTorque = 5 + (counter % 15);
-
-        // Вычисляемые параметры
-        currentEfficiency = (currentSpeed * currentTorque * 100) / (currentPower * 100);
-        if (currentEfficiency > 95) currentEfficiency = 95;
-
-        currentEnergy = (currentPower * counter) / 3600;
-        currentCalculatedTemp = 25.0 + (currentPower / 500.0);
-        currentCalculatedCapacity = (currentTorque * counter) / 3600.0;
-        if (currentCalculatedCapacity > 100) currentCalculatedCapacity = 100;
-        currentCalculatedVoltage = 220.0 - (currentTorque * 0.5);
-        if (currentCalculatedVoltage < 200) currentCalculatedVoltage = 200;
-
-        updateSpeed(currentSpeed);
-        updatePower(currentPower);
-        updateTorque(currentTorque);
-
-    } else if (!isBlinking) {
-        // Система выключена - обнуляем
-        currentSpeed = 0;
-        currentPower = 0;
-        currentTorque = 0;
-        currentEfficiency = 0;
-        currentEnergy = 0;
-        currentCalculatedTemp = 0;
-        currentCalculatedCapacity = 0;
-        currentCalculatedVoltage = 0;
-
-        updateSpeed(0);
-        updatePower(0);
-        updateTorque(0);
+        // Дополнительные параметры уже обновлены в onBldcDataUpdated()
+        // Обновляем только если нужно что-то дополнительное
     }
 }
 
@@ -500,7 +548,6 @@ void MainWindow::updateChart()
     bool isOn = powerButtonWidget->rootObject()->property("isOn").toBool();
     bool isBlinking = powerButtonWidget->rootObject()->property("isBlinking").toBool();
 
-    // Обновляем график только если система полностью запущена
     if (!isOn || isBlinking) {
         return;
     }
@@ -511,7 +558,7 @@ void MainWindow::updateChart()
 
     QMutexLocker locker(&dataMutex);
 
-    // Отправляем все параметры
+    // Отправляем реальные данные с драйвера
     QMetaObject::invokeMethod(m_chartData->chartRoot, "addDataPoint",
         Qt::AutoConnection,
         Q_ARG(QVariant, QVariant("Обороты")),
@@ -573,7 +620,5 @@ void MainWindow::updateTorque(int value)
         torqueWidget->rootObject()->setProperty("value", value);
     }
 }
-
-
 
 

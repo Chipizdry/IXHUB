@@ -25,6 +25,9 @@ public:
     static constexpr quint16 REG_RPM = 0x0002;          // Обороты/мин
     static constexpr quint16 REG_TIMER_ARR = 0x0003;    // TIM1->ARR (период таймера)
     static constexpr quint16 REG_PWM_VALUE = 0x0004;    // Значение ШИМ
+    static constexpr quint16 REG_ANGLE_PHAZE = 0x0005;  // Угол опережения
+    //static constexpr quint16 REG_PWM_VALUE = 0x0006;    // Значение ШИМ
+
 
     explicit BldcDriverDevice(int slaveId, QObject *parent = nullptr);
     ~BldcDriverDevice();
