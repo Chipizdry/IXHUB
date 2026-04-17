@@ -20,7 +20,7 @@ Item {
     // Таймер для мигания
     Timer {
         id: blinkTimer
-        interval: 500
+        interval: 300
         repeat: true
         onTriggered: {
             if (powerButton.isBlinking) {

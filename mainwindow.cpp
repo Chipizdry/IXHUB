@@ -48,6 +48,10 @@ MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
     , ui(new Ui::MainWindow)
     , m_chartData(nullptr)
+    , m_startupTimer(nullptr)
+    , m_statusCheckTimer(nullptr)
+    , m_isStarting(false)
+    , m_currentStep(0)
 {
     ui->setupUi(this);
     // Устанавливаем вкладку "Информация" как активную по умолчанию
@@ -60,16 +64,32 @@ MainWindow::MainWindow(QWidget *parent)
     delete infoTab->layout();
     delete statisticsTab->layout();
 
-    // ========== Находим устройство реле (адрес 0x0A = 10) ==========
+    // ========== Находим устройство реле (адрес 1) ==========
     m_relayDevice = dynamic_cast<RelayDevice*>(
-        DeviceManager::instance().getDevice(0x1)
+        DeviceManager::instance().getDevice(1)
     );
 
     if (!m_relayDevice) {
-        qDebug() << "⚠️ Relay device with address 0x0A not found!";
+        qDebug() << "⚠️ Relay device with address 1 not found!";
     } else {
-        qDebug() << "✅ Relay device found, can control relay 1";
+        qDebug() << "✅ Relay device found";
+        // Подключаемся к сигналу изменения состояния реле
+        connect(m_relayDevice, &RelayDevice::relayStateChangedByName,
+                this, &MainWindow::onRelayStateChanged);
+
+        // ========== ВАЖНО: Подключаем сигнал команд к поллеру ==========
+        connect(m_relayDevice, &RelayDevice::commandGenerated,
+                this, &MainWindow::onRelayCommandGenerated);
     }
+
+    // ========== Инициализация таймеров ==========
+    m_startupTimer = new QTimer(this);
+    m_startupTimer->setSingleShot(true);
+    connect(m_startupTimer, &QTimer::timeout, this, &MainWindow::onStartupTimerTimeout);
+
+    m_statusCheckTimer = new QTimer(this);
+    m_statusCheckTimer->setSingleShot(true);
+    connect(m_statusCheckTimer, &QTimer::timeout, this, &MainWindow::checkRelayStatus);
 
     // ========== 1. Левый индикатор (Мощность) ==========
     powerWidget = new QQuickWidget(infoTab);
@@ -118,6 +138,7 @@ MainWindow::MainWindow(QWidget *parent)
         connect(buttonRoot, SIGNAL(toggled(bool)),
                 this, SLOT(onPowerButtonToggled(bool)));
         buttonRoot->setProperty("isOn", false);
+        buttonRoot->setProperty("isBlinking", false);
     }
 
     // ========== 5. График для вкладки Статистика ==========
@@ -139,12 +160,12 @@ MainWindow::MainWindow(QWidget *parent)
     // ========== Таймер для обновления индикаторов (быстрый) ==========
     QTimer *updateTimer = new QTimer(this);
     connect(updateTimer, &QTimer::timeout, this, &MainWindow::updateIndicators);
-    updateTimer->start(100);  // Быстрый таймер для индикаторов
+    updateTimer->start(100);
 
     // ========== Таймер для графика (медленный, отдельный) ==========
     QTimer *chartTimer = new QTimer(this);
     connect(chartTimer, &QTimer::timeout, this, &MainWindow::updateChart);
-    chartTimer->start(1000);  // Интервал обновления графика
+    chartTimer->start(1000);
 
     qDebug() << "✅ All timers started";
 
@@ -153,6 +174,10 @@ MainWindow::MainWindow(QWidget *parent)
 
 MainWindow::~MainWindow()
 {
+    // Останавливаем таймеры
+    if (m_startupTimer) m_startupTimer->stop();
+    if (m_statusCheckTimer) m_statusCheckTimer->stop();
+
     // Безопасное удаление
     if (m_chartData) {
         if (m_chartData->timer) {
@@ -181,7 +206,6 @@ void MainWindow::initializeChart()
     m_chartData->chartRoot = chartRoot;
 
     // Настраиваем свойства графика
-   // chartRoot->setProperty("chartTitle", "Динамика скорости маховика");
     chartRoot->setProperty("xAxisLabel", "Время (сек)");
     chartRoot->setProperty("yAxisLabel", "Скорость (об/мин)");
     chartRoot->setProperty("maxYValue", 10000);
@@ -211,7 +235,204 @@ void MainWindow::initializeChart()
     }
 }
 
+// ==================== УПРАВЛЕНИЕ КНОПКОЙ ====================
 
+void MainWindow::setButtonBlinking(bool blinking, bool finalState)
+{
+    if (!powerButtonWidget || !powerButtonWidget->rootObject()) {
+        return;
+    }
+
+    QObject *buttonRoot = powerButtonWidget->rootObject();
+
+    if (blinking) {
+        buttonRoot->setProperty("isBlinking", true);
+        qDebug() << "🔴🟢 Button blinking started";
+    } else {
+        buttonRoot->setProperty("isBlinking", false);
+        buttonRoot->setProperty("isOn", finalState);
+        qDebug() << "Button blinking stopped, final state:" << (finalState ? "ON" : "OFF");
+    }
+}
+
+// ==================== НОВЫЙ СЛОТ ДЛЯ ОТПРАВКИ КОМАНД ====================
+
+void MainWindow::onRelayCommandGenerated(const QByteArray& command)
+{
+    qDebug() << "📤 Relay command generated, sending to poller...";
+
+    if (g_poller) {
+        g_poller->sendPriorityCommand(1, command, "RelayCommand");
+        qDebug() << "✅ Command sent to poller";
+    } else if (g_master) {
+        g_master->sendRawData(1, command);
+        qDebug() << "✅ Command sent directly to Modbus";
+    } else {
+        qDebug() << "❌ No Modbus master available!";
+    }
+}
+
+// ==================== ОТПРАВКА КОМАНД ====================
+
+void MainWindow::sendRelayCommand(const QString& relayName, bool state)
+{
+    if (!m_relayDevice) {
+        qDebug() << "❌ Relay device not available!";
+        return;
+    }
+
+    qDebug() << "📡 Sending relay command:" << relayName << "->" << (state ? "ON" : "OFF");
+    m_relayDevice->setRelayByName(relayName, state);
+}
+
+// ==================== ПОСЛЕДОВАТЕЛЬНОСТЬ ВКЛЮЧЕНИЯ ====================
+
+void MainWindow::startRelaySequence()
+{
+    qDebug() << "🚀 Starting relay sequence...";
+    m_isStarting = true;
+    m_currentStep = 0;
+
+    // Включаем мигание кнопки
+    setButtonBlinking(true, false);
+
+    // Шаг 1: Включаем балластный резистор
+    sendRelayCommand("Ballast_Resistor", true);
+
+    // Запускаем таймер на 3 секунды для следующего шага
+    m_startupTimer->start(3000);
+}
+
+void MainWindow::onStartupTimerTimeout()
+{
+    qDebug() << "⏰ Timer timeout, turning on Main Power...";
+
+    // Шаг 2: Включаем основное питание
+    sendRelayCommand("Main_Power", true);
+
+    // Запускаем проверку статуса через 500 мс
+    m_statusCheckTimer->start(500);
+}
+
+void MainWindow::checkRelayStatus()
+{
+    qDebug() << "🔍 Checking relay status...";
+
+    if (!m_relayDevice) {
+        qDebug() << "❌ Relay device not available!";
+        setButtonBlinking(false, false);
+        m_isStarting = false;
+        return;
+    }
+
+    // Проверяем состояние реле по именам
+    bool ballastOn = m_relayDevice->getRelayStateByName("Ballast_Resistor");
+    bool mainPowerOn = m_relayDevice->getRelayStateByName("Main_Power");
+
+    qDebug() << "  Ballast_Resistor:" << (ballastOn ? "ON" : "OFF");
+    qDebug() << "  Main_Power:" << (mainPowerOn ? "ON" : "OFF");
+
+    // Проверяем, что оба реле включены
+    if (ballastOn && mainPowerOn) {
+        qDebug() << "✅ Both relays are ON! Starting system...";
+
+        // Останавливаем мигание и устанавливаем зеленый цвет
+        setButtonBlinking(false, true);
+        m_isStarting = false;
+
+        // Сбрасываем счетчики
+        currentSpeed = 0;
+        currentPower = 0;
+        currentTorque = 0;
+
+        qDebug() << "✅ System activated successfully";
+    } else {
+        qDebug() << "⏳ Waiting for relays... Retrying in 1 second";
+        m_statusCheckTimer->start(1000);
+    }
+}
+
+void MainWindow::onRelayStateChanged(const QString& relayName, bool state)
+{
+    qDebug() << "📢 Relay state changed:" << relayName << "->" << (state ? "ON" : "OFF");
+
+    // Если система в процессе запуска и оба реле включены - завершаем запуск
+    if (m_isStarting) {
+        if (m_relayDevice) {
+            bool ballastOn = m_relayDevice->getRelayStateByName("Ballast_Resistor");
+            bool mainPowerOn = m_relayDevice->getRelayStateByName("Main_Power");
+
+            if (ballastOn && mainPowerOn) {
+                qDebug() << "✅ Both relays detected ON via signal!";
+                setButtonBlinking(false, true);
+                m_isStarting = false;
+                if (m_statusCheckTimer) m_statusCheckTimer->stop();
+                if (m_startupTimer) m_startupTimer->stop();
+            }
+        }
+    }
+}
+
+// ==================== ОБРАБОТЧИК КНОПКИ ====================
+
+void MainWindow::onPowerButtonToggled(bool state)
+{
+    qDebug() << "🔘 Button toggled:" << (state ? "ON" : "OFF");
+
+    if (state) {
+        // ВКЛЮЧЕНИЕ - запускаем последовательность
+        if (!m_isStarting) {
+            startRelaySequence();
+        } else {
+            qDebug() << "⚠️ System is already starting, please wait...";
+            // Возвращаем кнопку в исходное состояние
+            if (powerButtonWidget && powerButtonWidget->rootObject()) {
+                powerButtonWidget->rootObject()->setProperty("isOn", false);
+            }
+        }
+    } else {
+        // ВЫКЛЮЧЕНИЕ - мгновенно отключаем всё
+        qDebug() << "🛑 Shutting down system immediately...";
+
+        // Останавливаем все таймеры
+        if (m_startupTimer) m_startupTimer->stop();
+        if (m_statusCheckTimer) m_statusCheckTimer->stop();
+
+        // Отключаем реле
+        if (m_relayDevice) {
+            sendRelayCommand("Ballast_Resistor", false);
+            sendRelayCommand("Main_Power", false);
+        }
+
+        // Останавливаем мигание и устанавливаем красный цвет
+        setButtonBlinking(false, false);
+        m_isStarting = false;
+
+        // Очищаем график
+        if (m_chartData && m_chartData->chartRoot && m_chartData->availableMethods.contains("clearChart")) {
+            QMetaObject::invokeMethod(m_chartData->chartRoot, "clearChart", Qt::AutoConnection);
+            qDebug() << "🧹 Chart cleared";
+        }
+
+        // Обнуляем показатели
+        currentSpeed = 0;
+        currentPower = 0;
+        currentTorque = 0;
+        currentEfficiency = 0;
+        currentEnergy = 0;
+        currentCalculatedTemp = 0;
+        currentCalculatedCapacity = 0;
+        currentCalculatedVoltage = 0;
+
+        updateSpeed(0);
+        updatePower(0);
+        updateTorque(0);
+
+        qDebug() << "✅ System deactivated";
+    }
+}
+
+// ==================== ОБНОВЛЕНИЕ ИНДИКАТОРОВ ====================
 
 void MainWindow::updateIndicators()
 {
@@ -222,8 +443,10 @@ void MainWindow::updateIndicators()
     }
 
     bool isOn = powerButtonWidget->rootObject()->property("isOn").toBool();
+    bool isBlinking = powerButtonWidget->rootObject()->property("isBlinking").toBool();
 
-    if (isOn) {
+    // Обновляем индикаторы только если система полностью запущена (не мигает)
+    if (isOn && !isBlinking) {
         static int counter = 0;
         counter++;
 
@@ -247,7 +470,8 @@ void MainWindow::updateIndicators()
         updatePower(currentPower);
         updateTorque(currentTorque);
 
-    } else {
+    } else if (!isBlinking) {
+        // Система выключена - обнуляем
         currentSpeed = 0;
         currentPower = 0;
         currentTorque = 0;
@@ -263,9 +487,6 @@ void MainWindow::updateIndicators()
     }
 }
 
-
-
-
 void MainWindow::updateChart()
 {
     if (!m_chartData || !m_chartData->isInitialized) {
@@ -277,8 +498,10 @@ void MainWindow::updateChart()
     }
 
     bool isOn = powerButtonWidget->rootObject()->property("isOn").toBool();
+    bool isBlinking = powerButtonWidget->rootObject()->property("isBlinking").toBool();
 
-    if (!isOn) {
+    // Обновляем график только если система полностью запущена
+    if (!isOn || isBlinking) {
         return;
     }
 
@@ -288,7 +511,7 @@ void MainWindow::updateChart()
 
     QMutexLocker locker(&dataMutex);
 
-    // Отправляем все параметры (и получаемые, и вычисляемые)
+    // Отправляем все параметры
     QMetaObject::invokeMethod(m_chartData->chartRoot, "addDataPoint",
         Qt::AutoConnection,
         Q_ARG(QVariant, QVariant("Обороты")),
@@ -328,58 +551,6 @@ void MainWindow::updateChart()
         Qt::AutoConnection,
         Q_ARG(QVariant, QVariant("Напряжение")),
         Q_ARG(QVariant, currentCalculatedVoltage));
-
-    qDebug() << "📊 Chart updated - Speed:" << currentSpeed
-             << "Current:" << currentTorque
-             << "Power:" << currentPower
-             << "Efficiency:" << currentEfficiency
-             << "Energy:" << currentEnergy
-             << "Temp:" << currentCalculatedTemp;
-}
-
-
-
-
-
-
-void MainWindow::onPowerButtonToggled(bool state)
-{
-    qDebug() << "🔘 Кнопка переключена:" << (state ? "ВКЛ" : "ВЫКЛ");
-
-    QMutexLocker locker(&dataMutex);
-
-    if (m_relayDevice) {
-        qDebug() << "📡 Отправляем команду на реле 1:" << (state ? "ON" : "OFF");
-        QByteArray command = m_relayDevice->generateSetRelayCommand(1, state);
-
-        if (!command.isEmpty() && g_poller) {
-            QString commandName = state ? "SetRelay1_ON" : "SetRelay1_OFF";
-            g_poller->sendPriorityCommand(0x01, command, commandName);
-            qDebug() << "✅ Команда отправлена в очередь поллера";
-        } else if (!command.isEmpty() && g_master) {
-            qDebug() << "⚠️ Poller not available, sending directly via ModbusMaster";
-            g_master->sendRawData(0x01, command);
-        } else {
-            qDebug() << "❌ Failed to send command";
-        }
-    } else {
-        qDebug() << "❌ Relay device not available!";
-    }
-
-    if (state) {
-        qDebug() << "✅ Система активирована, реле 1 включено";
-        // Сбрасываем счетчики при включении
-        currentSpeed = 0;
-        currentPower = 0;
-        currentTorque = 0;
-    } else {
-        qDebug() << "✅ Система деактивирована, реле 1 выключено";
-        // При выключении очищаем график
-        if (m_chartData && m_chartData->chartRoot && m_chartData->availableMethods.contains("clearChart")) {
-            QMetaObject::invokeMethod(m_chartData->chartRoot, "clearChart", Qt::AutoConnection);
-            qDebug() << "🧹 Chart cleared";
-        }
-    }
 }
 
 void MainWindow::updateSpeed(int value)
@@ -402,5 +573,7 @@ void MainWindow::updateTorque(int value)
         torqueWidget->rootObject()->setProperty("value", value);
     }
 }
+
+
 
 
