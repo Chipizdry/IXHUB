@@ -15,10 +15,13 @@ RelayDevice::RelayDevice(int slaveId, QObject *parent)
     : Device(slaveId, Device::TYPE_RELAY, QString("Relay_Block_%1").arg(slaveId), parent)
     , m_deviceAddress(static_cast<quint8>(slaveId))
     , m_baudRate(9600)
+    , m_role(ROLE_UNDEFINED)  // ИНИЦИАЛИЗАЦИЯ НОВОГО ПОЛЯ
 {
     for (int i = 0; i < 8; i++) {
         m_relayStates[i] = false;
         m_optocouplerStates[i] = false;
+        // Инициализация имен по умолчанию
+        m_relayNames[i] = QString("Relay_%1").arg(i + 1);
     }
 
     qDebug() << "RelayDevice created: slaveId=" << slaveId << ", address=" << m_deviceAddress;
@@ -33,7 +36,152 @@ QList<quint16> RelayDevice::getRegisterAddresses()
     return {0x0000, 0x03E8};
 }
 
-// ==================== ГЕНЕРАЦИЯ КОМАНД ====================
+// ==================== НОВЫЕ МЕТОДЫ УПРАВЛЕНИЯ РОЛЯМИ ====================
+
+QString RelayDevice::getRole() const
+{
+    switch(m_role) {
+        case ROLE_POWER_CONTROL: return "power_control";
+        case ROLE_COOLING_SYSTEM: return "cooling_system";
+        case ROLE_AUXILIARY: return "auxiliary";
+        case ROLE_SAFETY: return "safety";
+        case ROLE_LIGHTING: return "lighting";
+        case ROLE_ALARM: return "alarm";
+        default: return "undefined";
+    }
+}
+
+void RelayDevice::setRole(RelayRole role)
+{
+    if (m_role != role) {
+        m_role = role;
+
+        // Автоматически устанавливаем имена реле в зависимости от роли
+        switch(role) {
+            case ROLE_POWER_CONTROL:
+                setRelayName(1, "Ballast_Resistor");
+                setRelayName(2, "Main_Power");
+                setRelayName(3, "Standby_Power");
+                setRelayName(4, "Aux_Power");
+                break;
+
+            case ROLE_COOLING_SYSTEM:
+                setRelayName(1, "Cooling_Pump");
+                setRelayName(2, "Radiator_Fan");
+                setRelayName(3, "Chiller");
+                setRelayName(4, "Ventilation");
+                break;
+
+            case ROLE_SAFETY:
+                setRelayName(1, "Emergency_Stop");
+                setRelayName(2, "Fire_Suppression");
+                setRelayName(3, "Gas_Valve");
+                setRelayName(4, "Alarm_Siren");
+                break;
+
+            case ROLE_LIGHTING:
+                setRelayName(1, "Main_Light");
+                setRelayName(2, "Work_Light");
+                setRelayName(3, "Emergency_Light");
+                break;
+
+            case ROLE_ALARM:
+                setRelayName(1, "Siren");
+                setRelayName(2, "Strobe");
+                setRelayName(3, "Notification");
+                break;
+
+            default:
+                // Оставляем имена по умолчанию
+                for (int i = 0; i < 8; i++) {
+                    m_relayNames[i] = QString("Relay_%1").arg(i + 1);
+                }
+                break;
+        }
+
+        emit roleChanged();
+        qDebug() << "RelayDevice role changed:" << getRole() << "for slave" << m_slaveId;
+    }
+}
+
+void RelayDevice::setRole(const QString& role)
+{
+    if (role == "power_control") setRole(ROLE_POWER_CONTROL);
+    else if (role == "cooling_system") setRole(ROLE_COOLING_SYSTEM);
+    else if (role == "auxiliary") setRole(ROLE_AUXILIARY);
+    else if (role == "safety") setRole(ROLE_SAFETY);
+    else if (role == "lighting") setRole(ROLE_LIGHTING);
+    else if (role == "alarm") setRole(ROLE_ALARM);
+    else setRole(ROLE_UNDEFINED);
+}
+
+// ==================== НОВЫЕ МЕТОДЫ УПРАВЛЕНИЯ ИМЕНАМИ РЕЛЕ ====================
+
+void RelayDevice::setRelayName(int relayNumber, const QString& name)
+{
+    if (relayNumber >= 1 && relayNumber <= 8) {
+        if (m_relayNames[relayNumber - 1] != name) {
+            m_relayNames[relayNumber - 1] = name;
+            qDebug() << "Relay" << relayNumber << "renamed to:" << name;
+        }
+    }
+}
+
+QString RelayDevice::getRelayName(int relayNumber) const
+{
+    if (relayNumber >= 1 && relayNumber <= 8) {
+        return m_relayNames[relayNumber - 1];
+    }
+    return QString();
+}
+
+void RelayDevice::loadRelayMapping(const QMap<int, QString>& mapping)
+{
+    for (auto it = mapping.begin(); it != mapping.end(); ++it) {
+        setRelayName(it.key(), it.value());
+    }
+}
+
+int RelayDevice::getRelayNumberByName(const QString& name) const
+{
+    for (int i = 0; i < 8; i++) {
+        if (m_relayNames[i] == name) {
+            return i + 1;
+        }
+    }
+    return -1;
+}
+
+// ==================== НОВЫЕ МЕТОДЫ УПРАВЛЕНИЯ ПО ИМЕНАМ ====================
+
+void RelayDevice::setRelayByName(const QString& relayName, bool on)
+{
+    int relayNumber = getRelayNumberByName(relayName);
+    if (relayNumber != -1) {
+        setRelay(relayNumber, on);
+    } else {
+        qDebug() << "Relay name not found:" << relayName;
+    }
+}
+
+bool RelayDevice::getRelayState(int relayNumber) const
+{
+    if (relayNumber >= 1 && relayNumber <= 8) {
+        return m_relayStates[relayNumber - 1];
+    }
+    return false;
+}
+
+bool RelayDevice::getRelayStateByName(const QString& relayName) const
+{
+    int relayNumber = getRelayNumberByName(relayName);
+    if (relayNumber != -1) {
+        return m_relayStates[relayNumber - 1];
+    }
+    return false;
+}
+
+// ==================== ГЕНЕРАЦИЯ КОМАНД (БЕЗ ИЗМЕНЕНИЙ) ====================
 
 QByteArray RelayDevice::generateReadRelayStatusCommand() const
 {
@@ -170,7 +318,7 @@ QByteArray RelayDevice::generateSetBaudRateCommand(int baudRate) const
     return Device::appendCRC(command);
 }
 
-// ==================== ПАРСИНГ ОТВЕТОВ ====================
+// ==================== ПАРСИНГ ОТВЕТОВ (С ДОБАВЛЕНИЕМ СИГНАЛОВ) ====================
 
 void RelayDevice::parseRelayStatus(const QByteArray& data)
 {
@@ -178,7 +326,16 @@ void RelayDevice::parseRelayStatus(const QByteArray& data)
         quint8 statusByte = static_cast<quint8>(data[3]);
 
         for (int i = 0; i < 8; i++) {
-            m_relayStates[i] = (statusByte >> i) & 0x01;
+            bool newState = (statusByte >> i) & 0x01;
+            if (m_relayStates[i] != newState) {
+                m_relayStates[i] = newState;
+                emit relayStateChanged(i + 1, newState);
+                emit relayStateChangedByName(m_relayNames[i], newState);
+                qDebug() << QString("Relay %1 (%2) changed: %3")
+                            .arg(i + 1)
+                            .arg(m_relayNames[i])
+                            .arg(newState ? "ON" : "OFF");
+            }
         }
 
         qDebug() << QString("Relay states: 0x%1").arg(statusByte, 2, 16, QChar('0'));
@@ -233,14 +390,19 @@ void RelayDevice::parseWriteResponse(const QByteArray& data)
         for (int i = 0; i < 8; i++) {
             if (RELAY_ADDRESSES[i] == address) {
                 m_relayStates[i] = on;
-                qDebug() << QString("Relay %1 confirmed: %2").arg(i + 1).arg(on ? "ON" : "OFF");
+                emit relayStateChanged(i + 1, on);
+                emit relayStateChangedByName(m_relayNames[i], on);
+                qDebug() << QString("Relay %1 (%2) confirmed: %3")
+                            .arg(i + 1)
+                            .arg(m_relayNames[i])
+                            .arg(on ? "ON" : "OFF");
                 break;
             }
         }
     }
 }
 
-// ==================== ОСНОВНОЙ МЕТОД ОБРАБОТКИ ====================
+// ==================== ОСНОВНОЙ МЕТОД ОБРАБОТКИ (С ДОБАВЛЕНИЕМ ROLE) ====================
 
 QJsonObject RelayDevice::processData(const QByteArray& data)
 {
@@ -248,6 +410,7 @@ QJsonObject RelayDevice::processData(const QByteArray& data)
     result["device_type"] = "RelayBlock";
     result["slave_id"] = m_slaveId;
     result["name"] = m_name;
+    result["role"] = getRole();  // ДОБАВЛЯЕМ РОЛЬ В РЕЗУЛЬТАТ
 
     qDebug() << "RelayDevice: Raw data size:" << data.size() << "bytes, hex:" << data.toHex();
 
@@ -291,13 +454,16 @@ QJsonObject RelayDevice::processData(const QByteArray& data)
 
     QJsonArray relayArray;
     QJsonArray optoArray;
+    QJsonObject relayStatesNamed;  // НОВОЕ: именованные состояния
 
     for (int i = 0; i < 8; i++) {
         relayArray.append(m_relayStates[i]);
         optoArray.append(m_optocouplerStates[i]);
+        relayStatesNamed[m_relayNames[i]] = m_relayStates[i];  // ДОБАВЛЯЕМ ИМЕНОВАННЫЕ СОСТОЯНИЯ
     }
 
     result["relay_states"] = relayArray;
+    result["relay_states_named"] = relayStatesNamed;  // НОВОЕ ПОЛЕ
     result["optocoupler_states"] = optoArray;
     result["device_address"] = m_deviceAddress;
     result["baud_rate"] = m_baudRate;
@@ -310,8 +476,9 @@ QJsonObject RelayDevice::processData(const QByteArray& data)
         optoStr += m_optocouplerStates[i] ? "1" : "0";
     }
 
-    qDebug() << QString("RelayDevice Slave %1: Addr=%2, Baud=%3, Relays=%4, Opto=%5")
+    qDebug() << QString("RelayDevice Slave %1 [%2]: Addr=%3, Baud=%4, Relays=%5, Opto=%6")
                 .arg(m_slaveId)
+                .arg(getRole())
                 .arg(m_deviceAddress)
                 .arg(m_baudRate)
                 .arg(relayStr)
@@ -320,7 +487,7 @@ QJsonObject RelayDevice::processData(const QByteArray& data)
     return result;
 }
 
-// ==================== ПУБЛИЧНЫЕ МЕТОДЫ УПРАВЛЕНИЯ ====================
+// ==================== ПУБЛИЧНЫЕ МЕТОДЫ УПРАВЛЕНИЯ (БЕЗ ИЗМЕНЕНИЙ) ====================
 
 void RelayDevice::setRelay(int relayNumber, bool on)
 {
@@ -329,7 +496,10 @@ void RelayDevice::setRelay(int relayNumber, bool on)
         return;
     }
 
-    qDebug() << QString("Set relay %1: %2").arg(relayNumber).arg(on ? "ON" : "OFF");
+    qDebug() << QString("Set relay %1 (%2): %3")
+                .arg(relayNumber)
+                .arg(m_relayNames[relayNumber - 1])
+                .arg(on ? "ON" : "OFF");
 
     QByteArray command = generateSetRelayCommand(relayNumber, on);
     if (!command.isEmpty()) {
@@ -413,7 +583,7 @@ void RelayDevice::readBaudRate()
     }
 }
 
-// ==================== TO JSON ====================
+// ==================== TO JSON (С ДОБАВЛЕНИЕМ ROLE) ====================
 
 QJsonObject RelayDevice::toJson() const
 {
@@ -421,16 +591,20 @@ QJsonObject RelayDevice::toJson() const
 
     QJsonArray relayArray;
     QJsonArray optoArray;
+    QJsonObject relayNamesObj;
 
     for (int i = 0; i < 8; i++) {
         relayArray.append(m_relayStates[i]);
         optoArray.append(m_optocouplerStates[i]);
+        relayNamesObj[QString::number(i + 1)] = m_relayNames[i];
     }
 
     obj["relay_states"] = relayArray;
     obj["optocoupler_states"] = optoArray;
+    obj["relay_names"] = relayNamesObj;
     obj["device_address"] = m_deviceAddress;
     obj["baud_rate"] = m_baudRate;
+    obj["role"] = getRole();  // ДОБАВЛЯЕМ РОЛЬ
 
     return obj;
 }

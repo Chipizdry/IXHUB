@@ -46,7 +46,23 @@ QString getCpuSerialNumber() {
 void setupDefaultDevices() {
     auto& dm = DeviceManager::instance();
 
-    dm.addDevice(new RelayDevice(1));
+
+    // Релейный модуль для управления питанием (адрес 1)
+        RelayDevice* powerRelay = new RelayDevice(1);
+        powerRelay->setRole(RelayDevice::ROLE_POWER_CONTROL);
+        powerRelay->setName("Power_Control_Unit");
+        dm.addDevice(powerRelay);
+
+    // Релейный модуль для системы охлаждения (адрес 2)
+       RelayDevice* coolingRelay = new RelayDevice(0x0A);
+       coolingRelay->setRole(RelayDevice::ROLE_COOLING_SYSTEM);
+       coolingRelay->setName("Cooling_System_Unit");
+       // Можно переопределить имена
+       coolingRelay->setRelayName(1, "Water_Pump");
+       coolingRelay->setRelayName(2, "Radiator_Fan");
+       dm.addDevice(coolingRelay);
+
+    //dm.addDevice(new RelayDevice(1));
     dm.addDevice(new BldcDriverDevice(2));
     dm.addDevice(new NTA8A01Device(3));
     dm.addDevice(new NTA8A01Device(4));
