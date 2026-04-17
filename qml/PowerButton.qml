@@ -1,6 +1,7 @@
 
 
 
+
 import QtQuick 2.12
 import QtQuick.Controls 2.12
 
@@ -10,15 +11,80 @@ Item {
     height: 60
 
     property bool isOn: false
+    property bool isBlinking: false
     property color colorOn: "#2ecc71"
     property color colorOff: "#e74c3c"
 
     signal toggled(bool state)
 
+    // Таймер для мигания
+    Timer {
+        id: blinkTimer
+        interval: 500
+        repeat: true
+        onTriggered: {
+            if (powerButton.isBlinking) {
+                blinkState = !blinkState;
+                updateColors();
+            }
+        }
+    }
+
+    // Состояние мигания
+    property bool blinkState: true
+
+    // Функция получения текущего цвета
+    function getCurrentColor() {
+        if (isBlinking) {
+            return blinkState ? colorOn : colorOff;
+        }
+        return isOn ? colorOn : colorOff;
+    }
+
+    // Функция обновления всех цветов
+    function updateColors() {
+        var currentColor = getCurrentColor();
+
+        // Обновляем фон
+        bgCircle.color = currentColor;
+
+        // Обновляем границу
+        mainCircle.border.color = currentColor;
+
+        // Обновляем вертикальную линию
+        verticalLine.color = currentColor;
+
+        // Обновляем текст
+        statusText.color = currentColor;
+
+        // Перерисовываем канвас
+        arcCanvas.requestPaint();
+    }
+
+    // Обработчик изменения isBlinking
+    onIsBlinkingChanged: {
+        if (isBlinking) {
+            blinkState = true;
+            blinkTimer.start();
+            updateColors();
+        } else {
+            blinkTimer.stop();
+            updateColors();
+        }
+    }
+
+    // Обработчик изменения isOn
+    onIsOnChanged: {
+        if (!isBlinking) {
+            updateColors();
+        }
+    }
+
     Rectangle {
+        id: bgCircle
         anchors.fill: parent
         radius: width / 2
-        color: powerButton.isOn ? powerButton.colorOn : powerButton.colorOff
+        color: getCurrentColor()
         opacity: 0.15
         scale: 1.1
 
@@ -33,7 +99,7 @@ Item {
         radius: width / 2
         color: "white"
         border.width: 2
-        border.color: powerButton.isOn ? powerButton.colorOn : powerButton.colorOff
+        border.color: getCurrentColor()
 
         Behavior on border.color {
             ColorAnimation { duration: 200 }
@@ -53,7 +119,7 @@ Item {
                 width: parent.width * 0.08
                 height: parent.height * (powerButton.isOn ? 0.3 : 0.5)
                 radius: width / 2
-                color: powerButton.isOn ? powerButton.colorOn : powerButton.colorOff
+                color: getCurrentColor()
 
                 // Явное указание позиции Y с динамическим расчётом
                 y: powerButton.isOn ? parent.height * 0.35 : parent.height * 0.07
@@ -99,7 +165,7 @@ Item {
                     var radius = width / 2;
 
                     ctx.save();
-                    ctx.strokeStyle = powerButton.isOn ? powerButton.colorOn : powerButton.colorOff;
+                    ctx.strokeStyle = getCurrentColor();
                     ctx.lineWidth = radius * 0.15;
                     ctx.lineCap = "round";
 
@@ -116,6 +182,11 @@ Item {
         MouseArea {
             anchors.fill: parent
             onClicked: {
+                // Если идет мигание - игнорируем клик
+                if (powerButton.isBlinking) {
+                    return;
+                }
+
                 powerButton.isOn = !powerButton.isOn;
                 powerButton.toggled(powerButton.isOn);
 
@@ -123,16 +194,26 @@ Item {
                 mainCircle.scale = 0.95;
                 scaleTimer.start();
             }
-            onPressed: mainCircle.scale = 0.95
+            onPressed: {
+                if (!powerButton.isBlinking) {
+                    mainCircle.scale = 0.95;
+                }
+            }
             onReleased: {
-                if (!scaleTimer.running) mainCircle.scale = 1;
+                if (!scaleTimer.running && !powerButton.isBlinking) {
+                    mainCircle.scale = 1;
+                }
             }
         }
 
         Timer {
             id: scaleTimer
             interval: 100
-            onTriggered: mainCircle.scale = 1
+            onTriggered: {
+                if (!powerButton.isBlinking) {
+                    mainCircle.scale = 1;
+                }
+            }
         }
 
         Behavior on scale {
@@ -141,11 +222,17 @@ Item {
     }
 
     Text {
+        id: statusText
         anchors.top: parent.bottom
         anchors.topMargin: 8
         anchors.horizontalCenter: parent.horizontalCenter
-        text: powerButton.isOn ? "ВКЛ" : "ВЫКЛ"
-        color: powerButton.isOn ? powerButton.colorOn : powerButton.colorOff
+        text: {
+            if (powerButton.isBlinking) {
+                return "ПУСК";
+            }
+            return powerButton.isOn ? "ВКЛ" : "ВЫКЛ";
+        }
+        color: getCurrentColor()
         font.pixelSize: 10
         font.weight: Font.Bold
 

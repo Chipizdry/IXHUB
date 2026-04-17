@@ -45,13 +45,14 @@ QString getCpuSerialNumber() {
 
 void setupDefaultDevices() {
     auto& dm = DeviceManager::instance();
-    dm.addDevice(new VacuumPressureSensor(0x01));
+
+    dm.addDevice(new RelayDevice(1));
     dm.addDevice(new BldcDriverDevice(2));
     dm.addDevice(new NTA8A01Device(3));
     dm.addDevice(new NTA8A01Device(4));
     dm.addDevice(new NTA8A01Device(5));
     dm.addDevice(new NTA8A01Device(6));
-    dm.addDevice(new RelayDevice(0x0A));
+    dm.addDevice(new VacuumPressureSensor(0x09));
 
     // Загружаем конфигурацию если есть
     dm.loadConfig("/etc/modbus_devices.conf");

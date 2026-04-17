@@ -62,7 +62,7 @@ MainWindow::MainWindow(QWidget *parent)
 
     // ========== Находим устройство реле (адрес 0x0A = 10) ==========
     m_relayDevice = dynamic_cast<RelayDevice*>(
-        DeviceManager::instance().getDevice(0x0A)
+        DeviceManager::instance().getDevice(0x1)
     );
 
     if (!m_relayDevice) {
@@ -354,11 +354,11 @@ void MainWindow::onPowerButtonToggled(bool state)
 
         if (!command.isEmpty() && g_poller) {
             QString commandName = state ? "SetRelay1_ON" : "SetRelay1_OFF";
-            g_poller->sendPriorityCommand(0x0A, command, commandName);
+            g_poller->sendPriorityCommand(0x01, command, commandName);
             qDebug() << "✅ Команда отправлена в очередь поллера";
         } else if (!command.isEmpty() && g_master) {
             qDebug() << "⚠️ Poller not available, sending directly via ModbusMaster";
-            g_master->sendRawData(0x0A, command);
+            g_master->sendRawData(0x01, command);
         } else {
             qDebug() << "❌ Failed to send command";
         }
