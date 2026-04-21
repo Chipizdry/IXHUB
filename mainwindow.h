@@ -41,11 +41,16 @@ private slots:
     // Слоты для BLDC драйвера
     void onBldcCommandGenerated(const QByteArray& command);
     void onBldcDataUpdated();
+    // Слот для контроллера ШИМ
+    void onPwmTargetChanged(qreal value);
+    void updatePwm(int value);
 
 private:
     void updateSpeed(int value);
     void updatePower(int value);
     void updateTorque(int value);
+
+
 
     void setButtonBlinking(bool blinking, bool finalState = false);
     void sendRelayCommand(const QString& relayName, bool state);
@@ -58,6 +63,7 @@ private:
     QQuickWidget *torqueWidget;
     QQuickWidget *powerButtonWidget;
     QQuickWidget *m_chartWidget;
+    QQuickWidget *pwmControlWidget;
 
     RelayDevice *m_relayDevice;
     BldcDriverDevice *m_bldcDevice;
@@ -69,6 +75,10 @@ private:
 
     bool m_isStarting;
     int m_currentStep;
+
+    // Переменные для ШИМ
+    int targetPwm;   // Целевое значение ШИМ
+    int currentPwm;  // Текущее значение ШИМ с платы
 };
 
 #endif // MAINWINDOW_H

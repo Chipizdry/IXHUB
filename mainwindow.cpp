@@ -54,6 +54,10 @@ MainWindow::MainWindow(QWidget *parent)
     , m_isStarting(false)
     , m_currentStep(0)
     , m_bldcDevice(nullptr)
+    , pwmControlWidget(nullptr)
+    , targetPwm(0)
+    , currentPwm(0)
+
 {
     ui->setupUi(this);
     // Устанавливаем вкладку "Информация" как активную по умолчанию
@@ -157,7 +161,36 @@ MainWindow::MainWindow(QWidget *parent)
         buttonRoot->setProperty("isBlinking", false);
     }
 
-    // ========== 5. График для вкладки Статистика ==========
+    // ========== 5. Контроллер ШИМ ==========
+    pwmControlWidget = new QQuickWidget(infoTab);
+    pwmControlWidget->setFixedSize(250, 80);
+    pwmControlWidget->setResizeMode(QQuickWidget::SizeRootObjectToView);
+
+    QQmlContext *pwmControlContext = pwmControlWidget->rootContext();
+    pwmControlContext->setContextProperty("label", "ШИМ сигнал");
+    pwmControlContext->setContextProperty("unit", "%");
+    pwmControlContext->setContextProperty("minValue", 0);
+    pwmControlContext->setContextProperty("maxValue", 100);
+    pwmControlContext->setContextProperty("step", 5);
+    pwmControlContext->setContextProperty("targetValue", 0);
+    pwmControlContext->setContextProperty("currentValue", 0);
+
+    pwmControlWidget->setSource(QUrl("qrc:/qml/ValueControl.qml"));
+    pwmControlWidget->move(190, 450);
+    pwmControlWidget->setVisible(true);  // Явно делаем видимым
+   // pwmControlWidget->raise();           // Поднимаем наверх
+
+    // Отладочная информация
+    qDebug() << "=== PWM Widget Info ===";
+    qDebug() << "  Size:" << pwmControlWidget->size();
+    qDebug() << "  Position:" << pwmControlWidget->pos();
+    qDebug() << "  Is visible:" << pwmControlWidget->isVisible();
+    qDebug() << "  Parent size:" << infoTab->size();
+    qDebug() << "  Parent geometry:" << infoTab->geometry();
+
+
+
+    // ========== 6. График для вкладки Статистика ==========
     m_chartWidget = new QQuickWidget(statisticsTab);
     m_chartWidget->setFixedSize(1020, 510);
     m_chartWidget->setResizeMode(QQuickWidget::SizeRootObjectToView);
@@ -310,23 +343,28 @@ void MainWindow::onBldcCommandGenerated(const QByteArray& command)
     }
 }
 
+
 void MainWindow::onBldcDataUpdated()
 {
     if (!m_bldcDevice) return;
 
     QMutexLocker locker(&dataMutex);
 
-    // Получаем реальные обороты из драйвера
+    // Получаем данные из драйвера
     currentSpeed = m_bldcDevice->getRpm();
 
-    // Рассчитываем мощность по формуле (примерная зависимость)
-    // P (Вт) = (обороты * крутящий момент) / 9550
-    // Для примера используем приблизительный расчет
+    // Получаем текущее значение ШИМ (0-1000) и конвертируем в проценты (0-100)
+    int pwmRaw = m_bldcDevice->getPwmValue();
+    int pwmPercent = (pwmRaw * 100) / 1000;  // Масштабируем 0-1000 -> 0-100
+
+    // Обновляем контроллер ШИМ
+    updatePwm(pwmPercent);
+
+    // Рассчитываем мощность
     currentPower = currentSpeed * 2.5;
     if (currentPower > 10000) currentPower = 10000;
 
     // Рассчитываем ток (А) = мощность / напряжение
-    // Напряжение ~ 220В
     currentTorque = currentPower / 220;
     if (currentTorque > 20) currentTorque = 20;
 
@@ -339,7 +377,6 @@ void MainWindow::onBldcDataUpdated()
     }
 
     // Накопленная энергия (Вт*ч)
-    static int lastSpeed = 0;
     static QElapsedTimer energyTimer;
     if (!energyTimer.isValid()) {
         energyTimer.start();
@@ -364,13 +401,16 @@ void MainWindow::onBldcDataUpdated()
 
     qDebug() << "🔄 BLDC Data Updated - RPM:" << currentSpeed
              << "Power:" << currentPower
-             << "Current:" << currentTorque;
+             << "Current:" << currentTorque
+             << "PWM:" << pwmPercent << "% (raw:" << pwmRaw << ")";
 
-    // Обновляем спидометр
+    // Обновляем спидометр и индикаторы
     updateSpeed(currentSpeed);
     updatePower(currentPower);
     updateTorque(currentTorque);
 }
+
+
 
 // ==================== ПОСЛЕДОВАТЕЛЬНОСТЬ ВКЛЮЧЕНИЯ ====================
 
@@ -452,6 +492,53 @@ void MainWindow::onRelayStateChanged(const QString& relayName, bool state)
         }
     }
 }
+
+
+
+void MainWindow::onPwmTargetChanged(qreal value)
+{
+    targetPwm = static_cast<int>(value);
+    qDebug() << "🎯 Target PWM changed to:" << targetPwm << "%";
+
+    // Проверяем, включена ли система
+    if (!powerButtonWidget || !powerButtonWidget->rootObject()) {
+        qDebug() << "⚠️ Power button widget not available";
+        return;
+    }
+
+    bool isOn = powerButtonWidget->rootObject()->property("isOn").toBool();
+    bool isBlinking = powerButtonWidget->rootObject()->property("isBlinking").toBool();
+
+    if (isOn && !isBlinking) {
+        // Отправляем команду на BLDC драйвер для изменения ШИМ
+        if (m_bldcDevice) {
+            // Конвертируем проценты (0-100) в значение драйвера (0-1000)
+            int pwmValue = (targetPwm * 1000) / 100;
+            m_bldcDevice->setPwmValue(pwmValue);
+            qDebug() << "📤 PWM command sent to driver:" << pwmValue << "(raw) /" << targetPwm << "%";
+        } else {
+            qDebug() << "⚠️ BLDC driver not available";
+        }
+    } else {
+        qDebug() << "⚠️ System is OFF or starting, PWM command not sent";
+    }
+}
+
+
+void MainWindow::updatePwm(int value)
+{
+    currentPwm = value;
+
+    if (pwmControlWidget && pwmControlWidget->rootObject()) {
+        pwmControlWidget->rootObject()->setProperty("currentValue", value);
+
+        // Если целевое значение совпадает с текущим, можно сбросить целевой режим
+        // (это произойдет автоматически в QML)
+    }
+}
+
+
+
 
 // ==================== ОБРАБОТЧИК КНОПКИ ====================
 
@@ -563,6 +650,11 @@ void MainWindow::updateChart()
         Qt::AutoConnection,
         Q_ARG(QVariant, QVariant("Обороты")),
         Q_ARG(QVariant, currentSpeed));
+
+    QMetaObject::invokeMethod(m_chartData->chartRoot, "addDataPoint",
+        Qt::AutoConnection,
+        Q_ARG(QVariant, QVariant("ШИМ")),  // Добавляем ШИМ на график
+        Q_ARG(QVariant, currentPwm));
 
     QMetaObject::invokeMethod(m_chartData->chartRoot, "addDataPoint",
         Qt::AutoConnection,
