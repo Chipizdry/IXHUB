@@ -48,16 +48,21 @@ struct ChartData {
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
     , ui(new Ui::MainWindow)
+    , powerWidget(nullptr)
+    , speedWidget(nullptr)
+    , torqueWidget(nullptr)
+    , powerButtonWidget(nullptr)
+    , m_chartWidget(nullptr)
+    , pwmControlWidget(nullptr)
+    , m_relayDevice(nullptr)
+    , m_bldcDevice(nullptr)
     , m_chartData(nullptr)
     , m_startupTimer(nullptr)
     , m_statusCheckTimer(nullptr)
     , m_isStarting(false)
     , m_currentStep(0)
-    , m_bldcDevice(nullptr)
-    , pwmControlWidget(nullptr)
     , targetPwm(0)
     , currentPwm(0)
-
 {
     ui->setupUi(this);
     // Устанавливаем вкладку "Информация" как активную по умолчанию
@@ -127,7 +132,7 @@ MainWindow::MainWindow(QWidget *parent)
 
     // ========== 2. Центральный спидометр ==========
     speedWidget = new QQuickWidget(infoTab);
-    speedWidget->setFixedSize(420, 420);
+    speedWidget->setFixedSize(360, 360);
     speedWidget->setResizeMode(QQuickWidget::SizeRootObjectToView);
     speedWidget->setSource(QUrl("qrc:/qml/Speedometer.qml"));
     speedWidget->move(190, 20);
@@ -176,18 +181,8 @@ MainWindow::MainWindow(QWidget *parent)
     pwmControlContext->setContextProperty("currentValue", 0);
 
     pwmControlWidget->setSource(QUrl("qrc:/qml/ValueControl.qml"));
-    pwmControlWidget->move(190, 450);
+    pwmControlWidget->move(230, 400);
     pwmControlWidget->setVisible(true);  // Явно делаем видимым
-   // pwmControlWidget->raise();           // Поднимаем наверх
-
-    // Отладочная информация
-    qDebug() << "=== PWM Widget Info ===";
-    qDebug() << "  Size:" << pwmControlWidget->size();
-    qDebug() << "  Position:" << pwmControlWidget->pos();
-    qDebug() << "  Is visible:" << pwmControlWidget->isVisible();
-    qDebug() << "  Parent size:" << infoTab->size();
-    qDebug() << "  Parent geometry:" << infoTab->geometry();
-
 
 
     // ========== 6. График для вкладки Статистика ==========
