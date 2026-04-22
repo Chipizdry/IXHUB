@@ -20,7 +20,7 @@ public:
     static constexpr quint8 FC_WRITE_MULTIPLE = 0x10;
 
     // Register addresses
-    static constexpr quint16 REG_PWM_KHZ = 0x0000;      // Частота ШИМ (кГц)
+    static constexpr quint16 REG_PWM = 0x0000;  // Целевое значение ШИМ (запись)
     static constexpr quint16 REG_PWM_HZ = 0x0001;       // Частота ШИМ (Гц)
     static constexpr quint16 REG_RPM = 0x0002;          // Обороты/мин
     static constexpr quint16 REG_TIMER_ARR = 0x0003;    // TIM1->ARR (период таймера)

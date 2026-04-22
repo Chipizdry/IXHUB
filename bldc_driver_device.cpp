@@ -30,7 +30,7 @@ BldcDriverDevice::~BldcDriverDevice()
 QList<quint16> BldcDriverDevice::getRegisterAddresses()
 {
     // Читаем регистры: 0x0000, 0x0001, 0x0002, 0x0003, 0x0004,0x0005,0x0006,0x0007
-    return {REG_PWM_KHZ, REG_PWM_KHZ, REG_RPM, REG_TIMER_ARR, REG_PWM_VALUE,REG_ANGLE_PHAZE};
+    return {REG_PWM, REG_PWM_HZ, REG_RPM, REG_TIMER_ARR, REG_PWM_VALUE,REG_ANGLE_PHAZE};
 }
 
 // ==================== ГЕНЕРАЦИЯ КОМАНД ====================
@@ -204,7 +204,7 @@ void BldcDriverDevice::parseWriteResponse(const QByteArray& data)
 
         // Обновляем соответствующий регистр
         switch(regAddr) {
-            case REG_PWM_KHZ: m_pwmKhz = value; break;
+            case REG_PWM: m_pwmKhz = value; break;
             case REG_PWM_HZ: m_pwmHz = value; break;
             case REG_RPM: m_rpm = value; break;
             case REG_TIMER_ARR: m_timerArr = value; break;
@@ -286,7 +286,7 @@ quint8 BldcDriverDevice::getCoilsByte() const
 void BldcDriverDevice::setPwmKhz(quint16 khz)
 {
     qDebug() << "BLDC: Set PWM frequency (kHz):" << khz;
-    QByteArray command = generateWriteRegisterCommand(REG_PWM_KHZ, khz);
+    QByteArray command = generateWriteRegisterCommand(REG_PWM_HZ, khz);
     if (!command.isEmpty()) {
         emit commandGenerated(command);
         m_pwmKhz = khz;
@@ -308,12 +308,12 @@ void BldcDriverDevice::setPwmHz(quint16 hz)
 void BldcDriverDevice::setPwmValue(quint16 value)
 {
     // Ограничиваем значение от 0 до 1000
-    if (value > 1000) {
+    if (value > 2000) {
         qDebug() << "BLDC: PWM value limited from" << value << "to 1000";
-        value = 1000;
+        value = 2000;
     }
     qDebug() << "BLDC: Set PWM value:" << value;
-    QByteArray command = generateWriteRegisterCommand(REG_PWM_VALUE, value);
+    QByteArray command = generateWriteRegisterCommand(REG_PWM, value);
     if (!command.isEmpty()) {
         emit commandGenerated(command);
         m_pwmValue = value;

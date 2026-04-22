@@ -108,7 +108,7 @@ int main(int argc, char *argv[])
 
     // Запуск опроса устройств
     poller.start(30);
-    Logger::debug("Device poller started with interval 80ms");
+    Logger::debug("Device poller started with interval 30ms");
 
     // Запуск главного окна
     MainWindow w;
