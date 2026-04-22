@@ -54,6 +54,7 @@ MainWindow::MainWindow(QWidget *parent)
     , powerButtonWidget(nullptr)
     , m_chartWidget(nullptr)
     , pwmControlWidget(nullptr)
+    , pwmPanelWidget(nullptr)
     , m_relayDevice(nullptr)
     , m_bldcDevice(nullptr)
     , m_chartData(nullptr)
@@ -63,6 +64,10 @@ MainWindow::MainWindow(QWidget *parent)
     , m_currentStep(0)
     , targetPwm(0)
     , currentPwm(0)
+    , targetFrequencyKhz(0)      // Добавлено
+    , currentFrequencyKhz(0)     // Добавлено
+    , targetDutyPercent(0)       // Добавлено
+    , currentDutyPercent(0)
 {
     ui->setupUi(this);
     // Устанавливаем вкладку "Информация" как активную по умолчанию
@@ -183,6 +188,48 @@ MainWindow::MainWindow(QWidget *parent)
     pwmControlWidget->setSource(QUrl("qrc:/qml/ValueControl.qml"));
     pwmControlWidget->move(230, 400);
     pwmControlWidget->setVisible(true);  // Явно делаем видимым
+
+    // ========== 7. Панель управления частотой и скважностью ==========
+    targetFrequencyKhz = 0;
+    currentFrequencyKhz = 0;
+    targetDutyPercent = 0;
+    currentDutyPercent = 0;
+
+    pwmPanelWidget = new QQuickWidget(infoTab);
+    pwmPanelWidget->setFixedSize(420, 140);
+    pwmPanelWidget->setResizeMode(QQuickWidget::SizeRootObjectToView);
+
+    QQmlContext *panelContext = pwmPanelWidget->rootContext();
+    panelContext->setContextProperty("targetFrequency", 0);
+    panelContext->setContextProperty("currentFrequency", 0);
+    panelContext->setContextProperty("minFrequency", 1);
+    panelContext->setContextProperty("maxFrequency", 100);
+    panelContext->setContextProperty("frequencyStep", 1);
+    panelContext->setContextProperty("targetDuty", 0);
+    panelContext->setContextProperty("currentDuty", 0);
+    panelContext->setContextProperty("minDuty", 0);
+    panelContext->setContextProperty("maxDuty", 100);
+    panelContext->setContextProperty("dutyStep", 5);
+
+    pwmPanelWidget->setSource(QUrl("qrc:/qml/PwmControlPanel.qml"));
+    pwmPanelWidget->move(190, 190);  // Под контроллером ШИМ
+    pwmPanelWidget->setVisible(true);
+
+    // Подключаем сигналы
+    QObject *panelRoot = pwmPanelWidget->rootObject();
+    if (panelRoot) {
+        connect(panelRoot, SIGNAL(frequencyTargetChanged(qreal)),
+                this, SLOT(onFrequencyTargetChanged(qreal)));
+        connect(panelRoot, SIGNAL(dutyTargetChanged(qreal)),
+                this, SLOT(onDutyTargetChanged(qreal)));
+        connect(panelRoot, SIGNAL(stopRequested()),
+                this, SLOT(onStopRequested()));
+        qDebug() << "✅ PWM Panel signals connected";
+    }
+
+
+
+
 
 
     // ========== 6. График для вкладки Статистика ==========
@@ -345,15 +392,40 @@ void MainWindow::onBldcDataUpdated()
 
     QMutexLocker locker(&dataMutex);
 
-    // Получаем данные из драйвера
     currentSpeed = m_bldcDevice->getRpm();
 
-    // Получаем текущее значение ШИМ (0-1000) и конвертируем в проценты (0-100)
-    int pwmRaw = m_bldcDevice->getPwmValue();
-    int pwmPercent = (pwmRaw * 100) / 1000;  // Масштабируем 0-1000 -> 0-100
+    // Получаем текущие значения
+    quint16 timerArr = m_bldcDevice->getTimerArr();     // Период таймера (100%)
+    quint16 pwmRaw = m_bldcDevice->getPwmValue();       // Текущее значение ШИМ
+    qDebug() << "📊 RAW DATA - timerArr:" << timerArr << "pwmRaw:" << pwmRaw;
+    // Вычисляем скважность в процентах
+    int pwmPercent = 0;
+    if (timerArr > 0) {
+        pwmPercent = (pwmRaw * 100) / timerArr;
+    }
 
-    // Обновляем контроллер ШИМ
+    // Обновляем простой контроллер ШИМ
     updatePwm(pwmPercent);
+
+    // Вычисляем частоту ШИМ в кГц из TIM1->ARR
+    // Частота ШИМ = F_timer / (TIM1->ARR + 1)
+    // Для примера: таймер 168 МГц
+    qreal frequencyKhz = 0;
+    if (timerArr > 0) {
+        frequencyKhz = 168000.0 / (timerArr + 1);  // 168 МГц = 168000 кГц
+    }
+
+    // Обновляем панель частоты и скважности
+    currentFrequencyKhz = frequencyKhz;
+    currentDutyPercent = pwmPercent;
+    qDebug() << "📊 RAW DATA - timerArr:" << timerArr << "pwmRaw:" << pwmRaw;
+    if (pwmPanelWidget && pwmPanelWidget->rootObject()) {
+        pwmPanelWidget->rootObject()->setProperty("currentFrequency", currentFrequencyKhz);
+        pwmPanelWidget->rootObject()->setProperty("currentDuty", currentDutyPercent);
+        qDebug() << "📊 RAW DATA - timerArr:" << timerArr << "pwmRaw:" << pwmRaw;
+    }else {
+        qDebug() << "⚠️ pwmPanelWidget or rootObject is null!";
+    }
 
     // Рассчитываем мощность
     currentPower = currentSpeed * 2.5;
@@ -397,13 +469,16 @@ void MainWindow::onBldcDataUpdated()
     qDebug() << "🔄 BLDC Data Updated - RPM:" << currentSpeed
              << "Power:" << currentPower
              << "Current:" << currentTorque
-             << "PWM:" << pwmPercent << "% (raw:" << pwmRaw << ")";
+             << "TIMER_ARR:" << timerArr
+             << "PWM:" << pwmRaw << "(" << pwmPercent << "%)"
+             << "Freq:" << frequencyKhz << "kHz";
 
     // Обновляем спидометр и индикаторы
     updateSpeed(currentSpeed);
     updatePower(currentPower);
     updateTorque(currentTorque);
 }
+
 
 
 
@@ -490,12 +565,14 @@ void MainWindow::onRelayStateChanged(const QString& relayName, bool state)
 
 
 
+
 void MainWindow::onPwmTargetChanged(qreal value)
 {
     targetPwm = static_cast<int>(value);
+    targetDutyPercent = value;
+
     qDebug() << "🎯 Target PWM changed to:" << targetPwm << "%";
 
-    // Проверяем, включена ли система
     if (!powerButtonWidget || !powerButtonWidget->rootObject()) {
         qDebug() << "⚠️ Power button widget not available";
         return;
@@ -505,12 +582,20 @@ void MainWindow::onPwmTargetChanged(qreal value)
     bool isBlinking = powerButtonWidget->rootObject()->property("isBlinking").toBool();
 
     if (isOn && !isBlinking) {
-        // Отправляем команду на BLDC драйвер для изменения ШИМ
         if (m_bldcDevice) {
-            // Конвертируем проценты (0-100) в значение драйвера (0-1000)
-            int pwmValue = (targetPwm * 1000) / 100;
-            m_bldcDevice->setPwmValue(pwmValue);
-            qDebug() << "📤 PWM command sent to driver:" << pwmValue << "(raw) /" << targetPwm << "%";
+            // Получаем текущий TIM1->ARR (100%)
+            quint16 timerArr = m_bldcDevice->getTimerArr();
+
+            // Вычисляем значение PWM из процентов
+            quint16 pwmValue = static_cast<quint16>((value * timerArr) / 100);
+
+            m_bldcDevice->setTargetPwm(pwmValue);
+            qDebug() << "📤 PWM queued:" << pwmValue << "(duty:" << value << "%, ARR:" << timerArr << ")";
+
+            // Синхронизируем панель
+            if (pwmPanelWidget && pwmPanelWidget->rootObject()) {
+                pwmPanelWidget->rootObject()->setProperty("targetDuty", value);
+            }
         } else {
             qDebug() << "⚠️ BLDC driver not available";
         }
@@ -518,6 +603,102 @@ void MainWindow::onPwmTargetChanged(qreal value)
         qDebug() << "⚠️ System is OFF or starting, PWM command not sent";
     }
 }
+
+
+
+
+
+
+
+void MainWindow::onFrequencyTargetChanged(qreal value)
+{
+    targetFrequencyKhz = value;
+    qDebug() << "🎯 Target frequency changed to:" << targetFrequencyKhz << "kHz";
+
+    if (!powerButtonWidget || !powerButtonWidget->rootObject()) {
+        qDebug() << "⚠️ Power button widget not available";
+        return;
+    }
+
+    bool isOn = powerButtonWidget->rootObject()->property("isOn").toBool();
+    bool isBlinking = powerButtonWidget->rootObject()->property("isBlinking").toBool();
+
+    if (m_bldcDevice && isOn && !isBlinking) {
+        // Вычисляем TIM1->ARR из частоты
+        // TIM1->ARR = (F_timer / частота_ШИМ) - 1
+        // F_timer = 168 МГц, частота в Гц = value * 1000
+        quint16 timerArr = static_cast<quint16>(168000000 / (value * 1000)) - 1;
+        m_bldcDevice->setTimerArr(timerArr);
+        qDebug() << "📤 TIMER_ARR sent:" << timerArr << "(for" << value << "kHz)";
+    } else {
+        qDebug() << "⚠️ System is OFF or starting, frequency command not sent";
+    }
+}
+
+
+
+
+void MainWindow::onDutyTargetChanged(qreal value)
+{
+    targetDutyPercent = value;
+    targetPwm = static_cast<int>(value);
+
+    qDebug() << "🎯 Target duty changed to:" << targetDutyPercent << "%";
+
+    if (!powerButtonWidget || !powerButtonWidget->rootObject()) {
+        qDebug() << "⚠️ Power button widget not available";
+        return;
+    }
+
+    bool isOn = powerButtonWidget->rootObject()->property("isOn").toBool();
+    bool isBlinking = powerButtonWidget->rootObject()->property("isBlinking").toBool();
+
+    if (m_bldcDevice && isOn && !isBlinking) {
+        quint16 timerArr = m_bldcDevice->getTimerArr();
+        quint16 pwmValue = static_cast<quint16>((value * timerArr) / 100);
+
+        m_bldcDevice->setTargetPwm(pwmValue);
+        qDebug() << "📤 PWM sent:" << pwmValue << "(duty:" << value << "%, ARR:" << timerArr << ")";
+
+        if (pwmControlWidget && pwmControlWidget->rootObject()) {
+            pwmControlWidget->rootObject()->setProperty("targetValue", value);
+        }
+    } else {
+        qDebug() << "⚠️ System is OFF or starting, duty command not sent";
+    }
+}
+
+
+
+
+void MainWindow::onStopRequested()
+{
+    qDebug() << "🛑 STOP requested - setting PWM to 0";
+    targetDutyPercent = 0;
+
+    if (!powerButtonWidget || !powerButtonWidget->rootObject()) {
+        qDebug() << "⚠️ Power button widget not available";
+        return;
+    }
+
+    bool isOn = powerButtonWidget->rootObject()->property("isOn").toBool();
+    bool isBlinking = powerButtonWidget->rootObject()->property("isBlinking").toBool();
+
+    if (m_bldcDevice && isOn && !isBlinking) {
+        m_bldcDevice->setTargetPwm(0);
+        qDebug() << "📤 PWM set to 0";
+    }
+
+    // Сбрасываем оба контроллера
+    if (pwmControlWidget && pwmControlWidget->rootObject()) {
+        pwmControlWidget->rootObject()->setProperty("targetValue", 0);
+    }
+
+    if (pwmPanelWidget && pwmPanelWidget->rootObject()) {
+        pwmPanelWidget->rootObject()->setProperty("targetDuty", 0);
+    }
+}
+
 
 
 void MainWindow::updatePwm(int value)

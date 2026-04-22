@@ -6,5 +6,6 @@
         <file>qml/PowerButton.qml</file>
         <file>qml/ChartView.qml</file>
         <file>qml/ValueControl.qml</file>
+        <file>qml/PwmControlPanel.qml</file>
     </qresource>
 </RCC>

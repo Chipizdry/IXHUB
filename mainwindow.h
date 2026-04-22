@@ -45,6 +45,11 @@ private slots:
     void onPwmTargetChanged(qreal value);
     void updatePwm(int value);
 
+    void onFrequencyTargetChanged(qreal value);
+    void onDutyTargetChanged(qreal value);
+    void onStopRequested();
+
+
 private:
     void updateSpeed(int value);
     void updatePower(int value);
@@ -64,6 +69,7 @@ private:
     QQuickWidget *powerButtonWidget;
     QQuickWidget *m_chartWidget;
     QQuickWidget *pwmControlWidget;
+    QQuickWidget *pwmPanelWidget;
 
     RelayDevice *m_relayDevice;
     BldcDriverDevice *m_bldcDevice;
@@ -72,13 +78,20 @@ private:
 
     QTimer *m_startupTimer;
     QTimer *m_statusCheckTimer;
-
+    static constexpr int PWM_MAX = 2000;
     bool m_isStarting;
     int m_currentStep;
 
     // Переменные для ШИМ
     int targetPwm;   // Целевое значение ШИМ
     int currentPwm;  // Текущее значение ШИМ с платы
+
+    qreal targetFrequencyKhz;
+    qreal currentFrequencyKhz;
+    qreal targetDutyPercent;
+    qreal currentDutyPercent;
+
+
 };
 
 #endif // MAINWINDOW_H

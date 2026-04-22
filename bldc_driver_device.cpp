@@ -5,6 +5,33 @@
 #include <QDebug>
 #include <QDateTime>
 #include <QJsonArray>
+#include <QTimer>
+#include <QString>
+#include <QChar>
+
+
+// ==================== ОПРЕДЕЛЕНИЯ СТАТИЧЕСКИХ КОНСТАНТ ====================
+// Это обязательно для static constexpr членов класса в C++11/14
+constexpr quint8  BldcDriverDevice::FC_READ_HOLDING;
+constexpr quint8  BldcDriverDevice::FC_WRITE_SINGLE;
+constexpr quint8  BldcDriverDevice::FC_WRITE_MULTIPLE;
+
+constexpr quint16 BldcDriverDevice::REG_PWM;
+constexpr quint16 BldcDriverDevice::REG_PWM_HZ;
+constexpr quint16 BldcDriverDevice::REG_RPM;
+constexpr quint16 BldcDriverDevice::REG_TIMER_ARR;
+constexpr quint16 BldcDriverDevice::REG_PWM_VALUE;
+constexpr quint16 BldcDriverDevice::REG_ANGLE_PHAZE;
+constexpr quint16 BldcDriverDevice::REG_STATUS;
+
+constexpr quint16 BldcDriverDevice::PWM_MIN;
+constexpr quint16 BldcDriverDevice::PWM_MAX;
+constexpr quint16 BldcDriverDevice::TIMER_ARR_MIN;
+constexpr quint16 BldcDriverDevice::TIMER_ARR_MAX;
+
+constexpr int BldcDriverDevice::WRITE_DEBOUNCE_MS;
+constexpr int BldcDriverDevice::NUM_REGISTERS;
+
 
 BldcDriverDevice::BldcDriverDevice(int slaveId, QObject *parent)
     : Device(slaveId, Device::TYPE_BLDC_DRIVER, QString("BLDC_Driver_%1").arg(slaveId), parent)
@@ -13,6 +40,12 @@ BldcDriverDevice::BldcDriverDevice(int slaveId, QObject *parent)
     , m_rpm(0)
     , m_timerArr(0)
     , m_pwmValue(0)
+    , m_targetPwm(0)
+    , m_targetTimerArr(0)
+    , m_targetStatus(0)
+    , m_pwmDirty(false)
+    , m_timerArrDirty(false)
+    , m_statusDirty(false)
     , m_coil1(false)
     , m_coil2(false)
     , m_coil3(false)
@@ -21,6 +54,10 @@ BldcDriverDevice::BldcDriverDevice(int slaveId, QObject *parent)
     , m_powerOn(false)
 {
     qDebug() << "BldcDriverDevice created: slaveId=" << slaveId;
+
+    m_writeTimer = new QTimer(this);
+    m_writeTimer->setSingleShot(true);
+    connect(m_writeTimer, &QTimer::timeout, this, &BldcDriverDevice::onWriteTimerTimeout);
 }
 
 BldcDriverDevice::~BldcDriverDevice()
@@ -29,8 +66,7 @@ BldcDriverDevice::~BldcDriverDevice()
 
 QList<quint16> BldcDriverDevice::getRegisterAddresses()
 {
-    // Читаем регистры: 0x0000, 0x0001, 0x0002, 0x0003, 0x0004,0x0005,0x0006,0x0007
-    return {REG_PWM, REG_PWM_HZ, REG_RPM, REG_TIMER_ARR, REG_PWM_VALUE,REG_ANGLE_PHAZE};
+    return {REG_PWM, REG_PWM_HZ, REG_RPM, REG_TIMER_ARR, REG_PWM_VALUE, REG_ANGLE_PHAZE, REG_STATUS};
 }
 
 // ==================== ГЕНЕРАЦИЯ КОМАНД ====================
@@ -91,7 +127,7 @@ QByteArray BldcDriverDevice::generateWriteMultipleRegistersCommand(const QList<q
     command.append(static_cast<char>(startAddr & 0xFF));
     command.append(static_cast<char>(numRegs >> 8));
     command.append(static_cast<char>(numRegs & 0xFF));
-    command.append(static_cast<char>(numRegs * 2));  // Количество байт данных
+    command.append(static_cast<char>(numRegs * 2));
 
     for (quint16 value : values) {
         command.append(static_cast<char>(value >> 8));
@@ -105,7 +141,6 @@ QByteArray BldcDriverDevice::generateWriteMultipleRegistersCommand(const QList<q
 
 void BldcDriverDevice::parseHoldingRegisters(const QByteArray& data)
 {
-    // Формат ответа: [slave][func][byteCount][data...][CRC]
     if (data.size() < 4) {
         qDebug() << "BldcDriverDevice: Response too small, size:" << data.size();
         return;
@@ -125,20 +160,11 @@ void BldcDriverDevice::parseHoldingRegisters(const QByteArray& data)
     qDebug() << "BldcDriverDevice: Register data size:" << regData.size()
              << "bytes, hex:" << regData.toHex();
 
-    if (regData.size() >= 10) {  // 5 регистров * 2 байта
-        // Регистр 0x0000: Частота ШИМ (кГц)
+    if (regData.size() >= 10) {
         m_pwmKhz = (static_cast<quint8>(regData[0]) << 8) | static_cast<quint8>(regData[1]);
-
-        // Регистр 0x0001: Частота ШИМ (Гц)
         m_pwmHz = (static_cast<quint8>(regData[2]) << 8) | static_cast<quint8>(regData[3]);
-
-        // Регистр 0x0002: Обороты/мин
         m_rpm = (static_cast<quint8>(regData[4]) << 8) | static_cast<quint8>(regData[5]);
-
-        // Регистр 0x0003: TIM1->ARR (период таймера)
         m_timerArr = (static_cast<quint8>(regData[6]) << 8) | static_cast<quint8>(regData[7]);
-
-        // Регистр 0x0004: Значение ШИМ
         m_pwmValue = (static_cast<quint8>(regData[8]) << 8) | static_cast<quint8>(regData[9]);
 
         qDebug() << QString("BLDC Slave %1: PWM_KHZ=%2, PWM_HZ=%3, RPM=%4, TIMER_ARR=%5, PWM_VAL=%6")
@@ -148,13 +174,12 @@ void BldcDriverDevice::parseHoldingRegisters(const QByteArray& data)
                     .arg(m_rpm)
                     .arg(m_timerArr)
                     .arg(m_pwmValue);
-          emit dataUpdated();
+        emit dataUpdated();
 
     } else if (regData.size() >= 2) {
-        // Только один регистр (например, только RPM)
         m_rpm = (static_cast<quint8>(regData[0]) << 8) | static_cast<quint8>(regData[1]);
         qDebug() << QString("BLDC Slave %1: RPM=%2").arg(m_slaveId).arg(m_rpm);
-          emit dataUpdated();
+        emit dataUpdated();
     } else {
         qDebug() << "BldcDriverDevice: Invalid register data size:" << regData.size();
     }
@@ -162,13 +187,6 @@ void BldcDriverDevice::parseHoldingRegisters(const QByteArray& data)
 
 void BldcDriverDevice::parseCoilsAndStatus(quint8 statusByte)
 {
-    // coil_1 = бит 1
-    // coil_2 = бит 2
-    // coil_3 = бит 3
-    // coil_4 = бит 4
-    // auto_mode = бит 5
-    // pwr_on = бит 6
-
     m_coil1 = (statusByte >> 1) & 0x01;
     m_coil2 = (statusByte >> 2) & 0x01;
     m_coil3 = (statusByte >> 3) & 0x01;
@@ -202,12 +220,11 @@ void BldcDriverDevice::parseWriteResponse(const QByteArray& data)
         qDebug() << "BLDC: Write confirmed - register:" << QString("0x%1").arg(regAddr, 4, 16, QChar('0'))
                  << "value:" << value;
 
-        // Обновляем соответствующий регистр
         switch(regAddr) {
-            case REG_PWM: m_pwmKhz = value; break;
+            case REG_PWM: m_targetPwm = value; break;
             case REG_PWM_HZ: m_pwmHz = value; break;
             case REG_RPM: m_rpm = value; break;
-            case REG_TIMER_ARR: m_timerArr = value; break;
+            case REG_TIMER_ARR: m_targetTimerArr = value; break;
             case REG_PWM_VALUE: m_pwmValue = value; break;
         }
     } else if (funcCode == FC_WRITE_MULTIPLE) {
@@ -248,7 +265,6 @@ QJsonObject BldcDriverDevice::processData(const QByteArray& data)
             break;
     }
 
-    // Заполняем JSON результат
     result["pwm_khz"] = m_pwmKhz;
     result["pwm_hz"] = m_pwmHz;
     result["rpm"] = m_rpm;
@@ -269,6 +285,89 @@ QJsonObject BldcDriverDevice::processData(const QByteArray& data)
     return result;
 }
 
+// ==================== КЭШИРОВАНИЕ И ГРУППОВАЯ ЗАПИСЬ ====================
+
+void BldcDriverDevice::markDirty(quint16 regAddr, quint16 value)
+{
+    switch(regAddr) {
+        case REG_PWM:
+            m_targetPwm = value;
+            m_pwmDirty = true;
+            break;
+        case REG_TIMER_ARR:
+            m_targetTimerArr = value;
+            m_timerArrDirty = true;
+            break;
+        case REG_STATUS:
+            m_targetStatus = static_cast<quint8>(value);
+            m_statusDirty = true;
+            break;
+        default:
+            break;
+    }
+    scheduleWrite();
+}
+
+void BldcDriverDevice::scheduleWrite()
+{
+    if (!m_writeTimer->isActive()) {
+        m_writeTimer->start(WRITE_DEBOUNCE_MS);
+    }
+}
+
+void BldcDriverDevice::onWriteTimerTimeout()
+{
+    QList<quint16> addresses;
+    QList<quint16> values;
+
+    if (m_pwmDirty) {
+        addresses.append(REG_PWM);
+        values.append(m_targetPwm);
+        qDebug() << "BLDC: Queue PWM write:" << m_targetPwm;
+    }
+
+    if (m_timerArrDirty) {
+        addresses.append(REG_TIMER_ARR);
+        values.append(m_targetTimerArr);
+        qDebug() << "BLDC: Queue TIMER_ARR write:" << m_targetTimerArr;
+    }
+
+    if (m_statusDirty) {
+        addresses.append(REG_STATUS);
+        values.append(m_targetStatus);
+        qDebug() << "BLDC: Queue STATUS write:" << QString("0x%1").arg(m_targetStatus, 2, 16, QChar('0'));
+    }
+
+    if (!addresses.isEmpty()) {
+        if (addresses.size() > 1) {
+            QByteArray command = generateWriteMultipleRegistersCommand(addresses, values);
+            if (!command.isEmpty()) {
+                emit commandGenerated(command);
+                qDebug() << "📤 BLDC: Sent MULTIPLE write command for" << addresses.size() << "registers";
+            }
+        } else {
+            QByteArray command = generateWriteRegisterCommand(addresses.first(), values.first());
+            if (!command.isEmpty()) {
+                emit commandGenerated(command);
+                qDebug() << "📤 BLDC: Sent SINGLE write command for register 0x"
+                         << QString::number(addresses.first(), 16);
+            }
+        }
+    }
+
+    m_pwmDirty = false;
+    m_timerArrDirty = false;
+    m_statusDirty = false;
+}
+
+void BldcDriverDevice::flushWriteCache()
+{
+    if (m_writeTimer->isActive()) {
+        m_writeTimer->stop();
+    }
+    onWriteTimerTimeout();
+}
+
 // ==================== ПУБЛИЧНЫЕ МЕТОДЫ УПРАВЛЕНИЯ ====================
 
 quint8 BldcDriverDevice::getCoilsByte() const
@@ -283,10 +382,59 @@ quint8 BldcDriverDevice::getCoilsByte() const
     return result;
 }
 
+void BldcDriverDevice::setTargetPwm(quint16 value)
+{
+    if (value > PWM_MAX) {
+        qDebug() << "BLDC: PWM value limited from" << value << "to" << PWM_MAX;
+        value = PWM_MAX;
+    }
+    qDebug() << "BLDC: Set target PWM:" << value;
+    markDirty(REG_PWM, value);
+}
+
+void BldcDriverDevice::setTimerArr(quint16 value)
+{
+    qDebug() << "BLDC: Set TIMER_ARR:" << value;
+    markDirty(REG_TIMER_ARR, value);
+}
+
+void BldcDriverDevice::setStatus(quint8 status)
+{
+    qDebug() << "BLDC: Set status byte:" << QString("0x%1").arg(status, 2, 16, QChar('0'));
+
+    m_coil1 = (status >> 1) & 0x01;
+    m_coil2 = (status >> 2) & 0x01;
+    m_coil3 = (status >> 3) & 0x01;
+    m_coil4 = (status >> 4) & 0x01;
+    m_autoMode = (status >> 5) & 0x01;
+    m_powerOn = (status >> 6) & 0x01;
+
+    markDirty(REG_STATUS, status);
+}
+
+void BldcDriverDevice::setAutoMode(bool enabled)
+{
+    qDebug() << "BLDC: Auto mode:" << (enabled ? "ON" : "OFF");
+    m_autoMode = enabled;
+    setStatus(getCoilsByte());
+}
+
+void BldcDriverDevice::setPowerOn(bool on)
+{
+    qDebug() << "BLDC: Power:" << (on ? "ON" : "OFF");
+    m_powerOn = on;
+    setStatus(getCoilsByte());
+}
+
+void BldcDriverDevice::setPwmValue(quint16 value)
+{
+    setTargetPwm(value);
+}
+
 void BldcDriverDevice::setPwmKhz(quint16 khz)
 {
     qDebug() << "BLDC: Set PWM frequency (kHz):" << khz;
-    QByteArray command = generateWriteRegisterCommand(REG_PWM_HZ, khz);
+    QByteArray command = generateWriteRegisterCommand(REG_PWM, khz);
     if (!command.isEmpty()) {
         emit commandGenerated(command);
         m_pwmKhz = khz;
@@ -305,22 +453,6 @@ void BldcDriverDevice::setPwmHz(quint16 hz)
     }
 }
 
-void BldcDriverDevice::setPwmValue(quint16 value)
-{
-    // Ограничиваем значение от 0 до 1000
-    if (value > 2000) {
-        qDebug() << "BLDC: PWM value limited from" << value << "to 1000";
-        value = 2000;
-    }
-    qDebug() << "BLDC: Set PWM value:" << value;
-    QByteArray command = generateWriteRegisterCommand(REG_PWM, value);
-    if (!command.isEmpty()) {
-        emit commandGenerated(command);
-        m_pwmValue = value;
-        emit dataUpdated();
-    }
-}
-
 void BldcDriverDevice::setSpeed(quint16 rpm)
 {
     qDebug() << "BLDC: Set target RPM:" << rpm;
@@ -334,36 +466,7 @@ void BldcDriverDevice::setSpeed(quint16 rpm)
 
 void BldcDriverDevice::setCoils(quint8 coilState)
 {
-    qDebug() << "BLDC: Set coils byte:" << QString("0x%1").arg(coilState, 2, 16, QChar('0'));
-
-    // Обновляем отдельные биты
-    m_coil1 = (coilState >> 1) & 0x01;
-    m_coil2 = (coilState >> 2) & 0x01;
-    m_coil3 = (coilState >> 3) & 0x01;
-    m_coil4 = (coilState >> 4) & 0x01;
-    m_autoMode = (coilState >> 5) & 0x01;
-    m_powerOn = (coilState >> 6) & 0x01;
-
-    // Записываем в регистр 0x0007 (катушки и статус)
-    QByteArray command = generateWriteRegisterCommand(0x0007, coilState);
-    if (!command.isEmpty()) {
-        emit commandGenerated(command);
-        emit dataUpdated();
-    }
-}
-
-void BldcDriverDevice::setAutoMode(bool enabled)
-{
-    qDebug() << "BLDC: Auto mode:" << (enabled ? "ON" : "OFF");
-    m_autoMode = enabled;
-    setCoils(getCoilsByte());
-}
-
-void BldcDriverDevice::setPowerOn(bool on)
-{
-    qDebug() << "BLDC: Power:" << (on ? "ON" : "OFF");
-    m_powerOn = on;
-    setCoils(getCoilsByte());
+    setStatus(coilState);
 }
 
 void BldcDriverDevice::readAllRegisters()
@@ -407,6 +510,5 @@ QJsonObject BldcDriverDevice::toJson() const
 
     return obj;
 }
-
 
 
