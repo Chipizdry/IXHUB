@@ -321,37 +321,32 @@ void BldcDriverDevice::onWriteTimerTimeout()
     QList<quint16> values;
 
     if (m_pwmDirty) {
-        addresses.append(REG_PWM);
+        addresses.append(REG_PWM);        // 0x0000 - для PWM
         values.append(m_targetPwm);
         qDebug() << "BLDC: Queue PWM write:" << m_targetPwm;
     }
 
     if (m_timerArrDirty) {
-        addresses.append(REG_TIMER_ARR);
+        // ИСПРАВЛЕНО: используем REG_PWM_VALUE (0x0004) для записи ARR
+        addresses.append(REG_PWM_VALUE);  // 0x0004, а не 0x0003
         values.append(m_targetTimerArr);
         qDebug() << "BLDC: Queue TIMER_ARR write:" << m_targetTimerArr;
     }
 
     if (m_statusDirty) {
-        addresses.append(REG_STATUS);
+        addresses.append(REG_STATUS);     // 0x0007
         values.append(m_targetStatus);
         qDebug() << "BLDC: Queue STATUS write:" << QString("0x%1").arg(m_targetStatus, 2, 16, QChar('0'));
     }
 
     if (!addresses.isEmpty()) {
-        if (addresses.size() > 1) {
-            QByteArray command = generateWriteMultipleRegistersCommand(addresses, values);
-            if (!command.isEmpty()) {
-                emit commandGenerated(command);
-                qDebug() << "📤 BLDC: Sent MULTIPLE write command for" << addresses.size() << "registers";
-            }
-        } else {
-            QByteArray command = generateWriteRegisterCommand(addresses.first(), values.first());
-            if (!command.isEmpty()) {
-                emit commandGenerated(command);
-                qDebug() << "📤 BLDC: Sent SINGLE write command for register 0x"
-                         << QString::number(addresses.first(), 16);
-            }
+        QByteArray command = generateWriteMultipleRegistersCommand(addresses, values);
+        if (!command.isEmpty()) {
+            emit commandGenerated(command);
+            qDebug() << "📤 BLDC: Sent MULTIPLE write command (0x10) for"
+                     << addresses.size() << "registers";
+            // Выводим HEX команды для отладки
+            qDebug() << "   Command hex:" << command.toHex();
         }
     }
 
@@ -359,6 +354,10 @@ void BldcDriverDevice::onWriteTimerTimeout()
     m_timerArrDirty = false;
     m_statusDirty = false;
 }
+
+
+
+
 
 void BldcDriverDevice::flushWriteCache()
 {
