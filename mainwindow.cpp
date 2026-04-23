@@ -268,6 +268,34 @@ MainWindow::MainWindow(QWidget *parent)
     qDebug() << "✅ All timers started";
 
     ui->tabWidget->tabBar()->setExpanding(true);
+
+
+
+    // В конце конструктора, после всех инициализаций, добавьте:
+    QTimer::singleShot(500, this, [this]() {
+        if (m_bldcDevice) {
+            qDebug() << "🔧 Sending initial configuration to BLDC...";
+
+            // Устанавливаем частоту 20 кГц
+            quint16 defaultArr = 1799;  // 36000000/20000 - 1
+            m_bldcDevice->setTimerArr(defaultArr);
+
+            // Устанавливаем ШИМ 0%
+            m_bldcDevice->setTargetPwm(0);
+
+
+            // ПРИНУДИТЕЛЬНАЯ ОТПРАВКА
+            m_bldcDevice->flushWriteCache();
+
+            // Запрашиваем чтение
+            m_bldcDevice->readAllRegisters();
+
+            qDebug() << "🔧 Initial config sent: ARR=" << defaultArr << ", PWM=0, Power=ON";
+        }
+    });
+
+
+
 }
 
 MainWindow::~MainWindow()
@@ -326,6 +354,10 @@ void MainWindow::initializeChart()
         qDebug() << "⚠️ addDataPoint method NOT found!";
     }
 }
+
+
+
+
 
 // ==================== УПРАВЛЕНИЕ КНОПКОЙ ====================
 
@@ -392,8 +424,6 @@ void MainWindow::onBldcCommandGenerated(const QByteArray& command)
 }
 
 
-
-
 void MainWindow::onBldcDataUpdated()
 {
     if (!m_bldcDevice) return;
@@ -403,8 +433,6 @@ void MainWindow::onBldcDataUpdated()
     currentSpeed = m_bldcDevice->getRpm();
     quint16 timerArr = m_bldcDevice->getTimerArr();
     quint16 pwmRaw = m_bldcDevice->getPwmValue();
-
-    qDebug() << "📊 RAW DATA - timerArr:" << timerArr << "pwmRaw:" << pwmRaw;
 
     int pwmPercent = 0;
     qreal frequencyKhz = 0;
@@ -423,41 +451,21 @@ void MainWindow::onBldcDataUpdated()
         pwmPanelWidget->rootObject()->setProperty("currentFrequency", currentFrequencyKhz);
         pwmPanelWidget->rootObject()->setProperty("currentDuty", currentDutyPercent);
 
-        // ИСПРАВЛЕНО: синхронизация target при первом получении данных
+        // ТОЛЬКО для частоты: синхронизация target при первом получении
         QVariant targetFreq = pwmPanelWidget->rootObject()->property("targetFrequency");
-        QVariant targetDuty = pwmPanelWidget->rootObject()->property("targetDuty");
-
-        // Для частоты - синхронизируем если target=0 или target=current
-        if ((targetFreq.toReal() == 0 || qAbs(targetFreq.toReal() - currentFrequencyKhz) < 0.1) && currentFrequencyKhz > 0) {
+        if (targetFreq.toReal() == 0 && currentFrequencyKhz > 0) {
             pwmPanelWidget->rootObject()->setProperty("targetFrequency", currentFrequencyKhz);
             qDebug() << "🔧 Synced targetFrequency to:" << currentFrequencyKhz;
         }
 
-        // Для скважности - ИСПРАВЛЕНО: синхронизируем даже если current=0
-        // Устанавливаем targetDuty в 0, если current=0 и target еще не установлен
-        if (targetDuty.toReal() == 0) {
-            // Если currentDutyPercent > 0, ставим target равным current
-            if (currentDutyPercent > 0) {
-                pwmPanelWidget->rootObject()->setProperty("targetDuty", currentDutyPercent);
-                qDebug() << "🔧 Synced targetDuty to:" << currentDutyPercent;
-            }
-            // Если currentDutyPercent == 0, оставляем targetDuty = 0 (правильно для старта)
-            else {
-                qDebug() << "🔧 targetDuty remains 0 (starting from zero)";
-            }
-        }
+        // НЕ синхронизируем targetDuty - сохраняем пользовательские настройки!
 
-        // Принудительно обновляем режимы в QML
+        // Обновляем режимы
         QMetaObject::invokeMethod(pwmPanelWidget->rootObject(), "updateFreqMode");
         QMetaObject::invokeMethod(pwmPanelWidget->rootObject(), "updateDutyMode");
 
         qDebug() << "📊 UI Updated - Freq:" << currentFrequencyKhz << "kHz, Duty:" << currentDutyPercent << "%";
     }
-
-    qDebug() << "🔄 BLDC Data Updated - RPM:" << currentSpeed
-             << "TIMER_ARR:" << timerArr
-             << "PWM:" << pwmRaw << "(" << pwmPercent << "%)"
-             << "Freq:" << frequencyKhz << "kHz";
 
     updateSpeed(currentSpeed);
     updatePower(currentPower);
@@ -590,6 +598,10 @@ void MainWindow::onPwmTargetChanged(qreal value)
 }
 
 
+
+
+
+
 void MainWindow::onFrequencyTargetChanged(qreal value)
 {
     targetFrequencyKhz = value;
@@ -603,18 +615,35 @@ void MainWindow::onFrequencyTargetChanged(qreal value)
     // Обновляем target в QML
     if (pwmPanelWidget && pwmPanelWidget->rootObject()) {
         pwmPanelWidget->rootObject()->setProperty("targetFrequency", targetFrequencyKhz);
-        qDebug() << "✅ Updated QML targetFrequency to:" << targetFrequencyKhz;
     }
-    // ARR = (36,000,000 / (частота_Гц)) - 1
-    quint16 timerArr = static_cast<quint16>(36000000.0 / (value * 1000)) - 1;
 
-    // Используем существующий метод
-    m_bldcDevice->setTimerArr(timerArr);
-    // Принудительная отправка
+    // Вычисляем новый ARR
+    quint16 newTimerArr = static_cast<quint16>(36000000.0 / (value * 1000)) - 1;
+
+    qDebug() << "📊 Calculated ARR:" << newTimerArr << "for frequency:" << value << "kHz";
+
+    // Сохраняем текущий процент ШИМ
+    quint16 currentPwmPercent = 0;
+    if (m_bldcDevice->getTimerArr() > 0) {
+        currentPwmPercent = (m_bldcDevice->getPwmValue() * 100) / m_bldcDevice->getTimerArr();
+    }
+
+    // Устанавливаем новый ARR
+    m_bldcDevice->setTimerArr(newTimerArr);
+
+    // Пересчитываем PWM значение для сохранения того же процента
+    quint16 newPwmValue = static_cast<quint16>((currentPwmPercent * newTimerArr) / 100);
+    m_bldcDevice->setTargetPwm(newPwmValue);
+
+    // ПРИНУДИТЕЛЬНАЯ ОТПРАВКА
     m_bldcDevice->flushWriteCache();
 
-    qDebug() << "📤 Frequency sent, ARR:" << timerArr << "kHz:" << value;
+    qDebug() << "📤 Frequency sent, ARR:" << newTimerArr << "kHz:" << value
+             << "PWM preserved at:" << currentPwmPercent << "% (new PWM:" << newPwmValue << ")";
 }
+
+
+
 
 void MainWindow::onDutyTargetChanged(qreal value)
 {
@@ -631,23 +660,32 @@ void MainWindow::onDutyTargetChanged(qreal value)
     // Обновляем target в QML
     if (pwmPanelWidget && pwmPanelWidget->rootObject()) {
         pwmPanelWidget->rootObject()->setProperty("targetDuty", targetDutyPercent);
-        qDebug() << "✅ Updated QML targetDuty to:" << targetDutyPercent;
+        QMetaObject::invokeMethod(pwmPanelWidget->rootObject(), "updateDutyMode");
     }
 
     quint16 timerArr = m_bldcDevice->getTimerArr();
     if (timerArr == 0) {
-        timerArr = 7635;  // Используем значение из лога
+        timerArr = 1799;  // Значение по умолчанию для 20 кГц
+        qDebug() << "⚠️ timerArr was 0, using default:" << timerArr;
     }
 
     quint16 pwmValue = static_cast<quint16>((value * timerArr) / 100);
 
-    // Используем существующий метод
+    qDebug() << "📊 PWM calculation: duty=" << value << "%, ARR=" << timerArr << "→ PWM=" << pwmValue;
+
     m_bldcDevice->setTargetPwm(pwmValue);
-    // Принудительная отправка
+
+    // ПРИНУДИТЕЛЬНАЯ ОТПРАВКА
     m_bldcDevice->flushWriteCache();
 
     qDebug() << "📤 Duty sent, PWM:" << pwmValue << "(" << value << "%)";
+
+    // Синхронизируем простой контроллер ШИМ
+    if (pwmControlWidget && pwmControlWidget->rootObject()) {
+        pwmControlWidget->rootObject()->setProperty("targetValue", value);
+    }
 }
+
 
 
 

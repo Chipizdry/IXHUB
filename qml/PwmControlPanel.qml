@@ -291,7 +291,7 @@ Rectangle {
 
                         Text {
                             anchors.horizontalCenter: parent.horizontalCenter
-                            text: isDutyTargetMode ? targetDuty.toFixed(0) : currentDuty.toFixed(0)
+                            text: isDutyTargetMode ? targetDuty.toFixed(1) : currentDuty.toFixed(1)
                             color: "white"
                             font.pixelSize: 18
                             font.bold: true
