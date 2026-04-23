@@ -123,7 +123,7 @@ MainWindow::MainWindow(QWidget *parent)
 
     // ========== 1. Левый индикатор (Мощность) ==========
     powerWidget = new QQuickWidget(infoTab);
-    powerWidget->setFixedSize(120, 400);
+    powerWidget->setFixedSize(110, 400);
     powerWidget->setResizeMode(QQuickWidget::SizeRootObjectToView);
 
     QQmlContext *powerContext = powerWidget->rootContext();
@@ -133,18 +133,18 @@ MainWindow::MainWindow(QWidget *parent)
     powerContext->setContextProperty("gaugeMaxValue", 10000);
 
     powerWidget->setSource(QUrl("qrc:/qml/VerticalGauge.qml"));
-    powerWidget->move(20, 20);
+    powerWidget->move(10, 20);
 
     // ========== 2. Центральный спидометр ==========
     speedWidget = new QQuickWidget(infoTab);
     speedWidget->setFixedSize(360, 360);
     speedWidget->setResizeMode(QQuickWidget::SizeRootObjectToView);
     speedWidget->setSource(QUrl("qrc:/qml/Speedometer.qml"));
-    speedWidget->move(190, 20);
+    speedWidget->move(160, 20);
 
     // ========== 3. Правый индикатор (Ток) ==========
     torqueWidget = new QQuickWidget(infoTab);
-    torqueWidget->setFixedSize(120, 400);
+    torqueWidget->setFixedSize(110, 400);
     torqueWidget->setResizeMode(QQuickWidget::SizeRootObjectToView);
 
     QQmlContext *torqueContext = torqueWidget->rootContext();
@@ -154,7 +154,7 @@ MainWindow::MainWindow(QWidget *parent)
     torqueContext->setContextProperty("gaugeMaxValue", 20);
 
     torqueWidget->setSource(QUrl("qrc:/qml/VerticalGauge.qml"));
-    torqueWidget->move(650, 20);
+    torqueWidget->move(560, 20);
 
     // ========== 4. Кнопка включения/выключения ==========
     powerButtonWidget = new QQuickWidget(infoTab);
@@ -196,7 +196,7 @@ MainWindow::MainWindow(QWidget *parent)
     currentDutyPercent = 0;
 
     pwmPanelWidget = new QQuickWidget(infoTab);
-    pwmPanelWidget->setFixedSize(420, 140);
+    pwmPanelWidget->setFixedSize(290, 160);
     pwmPanelWidget->setResizeMode(QQuickWidget::SizeRootObjectToView);
 
     QQmlContext *panelContext = pwmPanelWidget->rootContext();
@@ -212,7 +212,7 @@ MainWindow::MainWindow(QWidget *parent)
     panelContext->setContextProperty("dutyStep", 5);
 
     pwmPanelWidget->setSource(QUrl("qrc:/qml/PwmControlPanel.qml"));
-    pwmPanelWidget->move(190, 190);  // Под контроллером ШИМ
+    pwmPanelWidget->move(700, 20);  // Под контроллером ШИМ
     pwmPanelWidget->setVisible(true);
 
     // Подключаем сигналы

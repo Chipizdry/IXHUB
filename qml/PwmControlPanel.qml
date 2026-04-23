@@ -1,26 +1,29 @@
+
+
+
 import QtQuick 2.12
 import QtQuick.Controls 2.12
 
 Rectangle {
     id: root
-    width: 400
-    height: 120
+    width: 420
+    height: 160
     color: "transparent"
 
     // Свойства для частоты ШИМ (TIM1->ARR)
     property real targetFrequency: 0       // Целевая частота в кГц
     property real currentFrequency: 0      // Текущая частота в кГц
     property real minFrequency: 1
-    property real maxFrequency: 100
-    property real frequencyStep: 1
-    
+    property real maxFrequency: 60
+    property real frequencyStep: 0.1
+
     // Свойства для скважности (заполнения)
     property real targetDuty: 0            // Целевая скважность в %
     property real currentDuty: 0           // Текущая скважность в %
     property real minDuty: 0
     property real maxDuty: 100
-    property real dutyStep: 5
-    
+    property real dutyStep: 0.2
+
     // Режимы отображения
     property bool isFreqTargetMode: false
     property bool isDutyTargetMode: false
@@ -34,15 +37,15 @@ Rectangle {
     function freqMatch() {
         return Math.abs(targetFrequency - currentFrequency) < 0.1
     }
-    
+
     function dutyMatch() {
         return Math.abs(targetDuty - currentDuty) < 0.1
     }
-    
+
     function updateFreqMode() {
         isFreqTargetMode = !freqMatch()
     }
-    
+
     function updateDutyMode() {
         isDutyTargetMode = !dutyMatch()
     }
@@ -74,7 +77,7 @@ Rectangle {
 
         Column {
             anchors.fill: parent
-            spacing: 8
+            spacing: 10
 
             // ========== СТРОКА УПРАВЛЕНИЯ ЧАСТОТОЙ ==========
             Row {
@@ -83,8 +86,8 @@ Rectangle {
 
                 // Кнопка уменьшения частоты
                 Rectangle {
-                    width: 40
-                    height: 35
+                    width: 50
+                    height: 40
                     radius: 6
                     color: freqMinus.pressed ? "#e74c3c" : "#c0392b"
                     border.color: "#e74c3c"
@@ -94,7 +97,7 @@ Rectangle {
                         anchors.centerIn: parent
                         text: "-"
                         color: "white"
-                        font.pixelSize: 22
+                        font.pixelSize: 24
                         font.bold: true
                     }
 
@@ -108,7 +111,7 @@ Rectangle {
                                 root.frequencyTargetChanged(targetFrequency)
                             }
                         }
-                        
+
                         Timer {
                             interval: 200
                             running: freqMinus.pressed
@@ -126,8 +129,8 @@ Rectangle {
 
                 // Поле отображения частоты
                 Rectangle {
-                    width: 90
-                    height: 35
+                    width: 120
+                    height: 40
                     radius: 6
                     color: isFreqTargetMode ? "#f39c12" : "#34495e"
                     border.color: isFreqTargetMode ? "#f1c40f" : "#2c3e50"
@@ -142,13 +145,13 @@ Rectangle {
 
                     Column {
                         anchors.centerIn: parent
-                        spacing: 1
+                        spacing: 2
 
                         Text {
                             anchors.horizontalCenter: parent.horizontalCenter
                             text: isFreqTargetMode ? targetFrequency.toFixed(1) : currentFrequency.toFixed(1)
                             color: "white"
-                            font.pixelSize: 16
+                            font.pixelSize: 18
                             font.bold: true
                         }
 
@@ -156,16 +159,16 @@ Rectangle {
                             anchors.horizontalCenter: parent.horizontalCenter
                             text: "кГц"
                             color: "#bdc3c7"
-                            font.pixelSize: 8
+                            font.pixelSize: 10
                         }
                     }
 
                     // Индикатор совпадения
                     Rectangle {
                         visible: freqMatch() && currentFrequency > 0
-                        width: 6
-                        height: 6
-                        radius: 3
+                        width: 8
+                        height: 8
+                        radius: 4
                         color: "#2ecc71"
                         anchors.left: parent.left
                         anchors.top: parent.top
@@ -176,8 +179,8 @@ Rectangle {
 
                 // Кнопка увеличения частоты
                 Rectangle {
-                    width: 40
-                    height: 35
+                    width: 50
+                    height: 40
                     radius: 6
                     color: freqPlus.pressed ? "#27ae60" : "#2ecc71"
                     border.color: "#27ae60"
@@ -187,7 +190,7 @@ Rectangle {
                         anchors.centerIn: parent
                         text: "+"
                         color: "white"
-                        font.pixelSize: 22
+                        font.pixelSize: 24
                         font.bold: true
                     }
 
@@ -201,7 +204,7 @@ Rectangle {
                                 root.frequencyTargetChanged(targetFrequency)
                             }
                         }
-                        
+
                         Timer {
                             interval: 200
                             running: freqPlus.pressed
@@ -216,16 +219,6 @@ Rectangle {
                         }
                     }
                 }
-
-                // Метка "Частота"
-                Text {
-                    text: "Частота"
-                    color: "#ecf0f1"
-                    font.pixelSize: 10
-                    font.bold: true
-                    anchors.verticalCenter: parent.verticalCenter
-                    width: 55
-                }
             }
 
             // ========== СТРОКА УПРАВЛЕНИЯ СКВАЖНОСТЬЮ ==========
@@ -235,8 +228,8 @@ Rectangle {
 
                 // Кнопка уменьшения скважности
                 Rectangle {
-                    width: 40
-                    height: 35
+                    width: 50
+                    height: 40
                     radius: 6
                     color: dutyMinus.pressed ? "#e74c3c" : "#c0392b"
                     border.color: "#e74c3c"
@@ -246,7 +239,7 @@ Rectangle {
                         anchors.centerIn: parent
                         text: "-"
                         color: "white"
-                        font.pixelSize: 22
+                        font.pixelSize: 24
                         font.bold: true
                     }
 
@@ -260,7 +253,7 @@ Rectangle {
                                 root.dutyTargetChanged(targetDuty)
                             }
                         }
-                        
+
                         Timer {
                             interval: 200
                             running: dutyMinus.pressed
@@ -278,8 +271,8 @@ Rectangle {
 
                 // Поле отображения скважности
                 Rectangle {
-                    width: 90
-                    height: 35
+                    width: 120
+                    height: 40
                     radius: 6
                     color: isDutyTargetMode ? "#f39c12" : "#34495e"
                     border.color: isDutyTargetMode ? "#f1c40f" : "#2c3e50"
@@ -294,13 +287,13 @@ Rectangle {
 
                     Column {
                         anchors.centerIn: parent
-                        spacing: 1
+                        spacing: 2
 
                         Text {
                             anchors.horizontalCenter: parent.horizontalCenter
                             text: isDutyTargetMode ? targetDuty.toFixed(0) : currentDuty.toFixed(0)
                             color: "white"
-                            font.pixelSize: 16
+                            font.pixelSize: 18
                             font.bold: true
                         }
 
@@ -308,16 +301,16 @@ Rectangle {
                             anchors.horizontalCenter: parent.horizontalCenter
                             text: "%"
                             color: "#bdc3c7"
-                            font.pixelSize: 8
+                            font.pixelSize: 10
                         }
                     }
 
                     // Индикатор совпадения
                     Rectangle {
                         visible: dutyMatch() && currentDuty > 0
-                        width: 6
-                        height: 6
-                        radius: 3
+                        width: 8
+                        height: 8
+                        radius: 4
                         color: "#2ecc71"
                         anchors.left: parent.left
                         anchors.top: parent.top
@@ -328,8 +321,8 @@ Rectangle {
 
                 // Кнопка увеличения скважности
                 Rectangle {
-                    width: 40
-                    height: 35
+                    width: 50
+                    height: 40
                     radius: 6
                     color: dutyPlus.pressed ? "#27ae60" : "#2ecc71"
                     border.color: "#27ae60"
@@ -339,7 +332,7 @@ Rectangle {
                         anchors.centerIn: parent
                         text: "+"
                         color: "white"
-                        font.pixelSize: 22
+                        font.pixelSize: 24
                         font.bold: true
                     }
 
@@ -353,7 +346,7 @@ Rectangle {
                                 root.dutyTargetChanged(targetDuty)
                             }
                         }
-                        
+
                         Timer {
                             interval: 200
                             running: dutyPlus.pressed
@@ -368,33 +361,34 @@ Rectangle {
                         }
                     }
                 }
+            }
 
-                // Кнопка СТОП
-                Rectangle {
-                    width: 55
-                    height: 35
-                    radius: 6
-                    color: stopButton.pressed ? "#c0392b" : "#e74c3c"
-                    border.color: "#c0392b"
-                    border.width: 2
+            // ========== КНОПКА СТОП НА ВСЮ ШИРИНУ ==========
+            Rectangle {
+                width: parent.width - 30
+                height: 40
+                radius: 6
+                color: stopButton.pressed ? "#c0392b" : "#e74c3c"
+                border.color: "#c0392b"
+                border.width: 2
+                anchors.horizontalCenter: parent.horizontalCenter
 
-                    Text {
-                        anchors.centerIn: parent
-                        text: "СТОП"
-                        color: "white"
-                        font.pixelSize: 12
-                        font.bold: true
-                    }
+                Text {
+                    anchors.centerIn: parent
+                    text: "СТОП"
+                    color: "white"
+                    font.pixelSize: 18
+                    font.bold: true
+                }
 
-                    MouseArea {
-                        id: stopButton
-                        anchors.fill: parent
-                        onClicked: {
-                            targetDuty = 0
-                            root.dutyTargetChanged(0)
-                            root.stopRequested()
-                            console.log("STOP pressed - duty set to 0")
-                        }
+                MouseArea {
+                    id: stopButton
+                    anchors.fill: parent
+                    onClicked: {
+                        targetDuty = 0
+                        root.dutyTargetChanged(0)
+                        root.stopRequested()
+                        console.log("STOP pressed - duty set to 0")
                     }
                 }
             }
