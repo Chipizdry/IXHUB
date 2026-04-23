@@ -226,6 +226,13 @@ MainWindow::MainWindow(QWidget *parent)
                 this, SLOT(onStopRequested()));
         qDebug() << "✅ PWM Panel signals connected";
     }
+    if (pwmPanelWidget && pwmPanelWidget->rootObject()) {
+       pwmPanelWidget->rootObject()->setProperty("targetFrequency", 20.0);
+       pwmPanelWidget->rootObject()->setProperty("targetDuty", 0);
+       pwmPanelWidget->rootObject()->setProperty("currentFrequency", 0);
+       pwmPanelWidget->rootObject()->setProperty("currentDuty", 0);
+       qDebug() << "🔧 Initial values set: Freq=20kHz, Duty=0%";
+     }
 
 
 
@@ -363,7 +370,6 @@ void MainWindow::sendRelayCommand(const QString& relayName, bool state)
         qDebug() << "❌ Relay device not available!";
         return;
     }
-
     qDebug() << "📡 Sending relay command:" << relayName << "->" << (state ? "ON" : "OFF");
     m_relayDevice->setRelayByName(relayName, state);
 }
@@ -386,6 +392,8 @@ void MainWindow::onBldcCommandGenerated(const QByteArray& command)
 }
 
 
+
+
 void MainWindow::onBldcDataUpdated()
 {
     if (!m_bldcDevice) return;
@@ -393,108 +401,64 @@ void MainWindow::onBldcDataUpdated()
     QMutexLocker locker(&dataMutex);
 
     currentSpeed = m_bldcDevice->getRpm();
-    quint16 timerArr = m_bldcDevice->getTimerArr();     // Период таймера (100%)
-    quint16 pwmRaw = m_bldcDevice->getPwmValue();        // Текущее значение ШИМ
+    quint16 timerArr = m_bldcDevice->getTimerArr();
+    quint16 pwmRaw = m_bldcDevice->getPwmValue();
+
     qDebug() << "📊 RAW DATA - timerArr:" << timerArr << "pwmRaw:" << pwmRaw;
-    // Вычисляем скважность в процентах
+
     int pwmPercent = 0;
+    qreal frequencyKhz = 0;
+
     if (timerArr > 0) {
         pwmPercent = (pwmRaw * 100) / timerArr;
-    }
-
-    // Обновляем простой контроллер ШИМ
-    updatePwm(pwmPercent);
-
-    // Вычисляем частоту ШИМ в кГц из TIM1->ARR
-    // Частота ШИМ = F_timer / (TIM1->ARR + 1)
-
-    qreal frequencyKhz = 0;
-    if (timerArr > 0) {
         frequencyKhz = 36000.0 / (timerArr + 1);
     }
 
-    // Обновляем панель частоты и скважности
+    updatePwm(pwmPercent);
+
     currentFrequencyKhz = frequencyKhz;
     currentDutyPercent = pwmPercent;
-    qDebug() << "📊 RAW DATA - timerArr:" << timerArr << "pwmRaw:" << pwmRaw;
+
     if (pwmPanelWidget && pwmPanelWidget->rootObject()) {
         pwmPanelWidget->rootObject()->setProperty("currentFrequency", currentFrequencyKhz);
         pwmPanelWidget->rootObject()->setProperty("currentDuty", currentDutyPercent);
 
-        // ДОБАВЬТЕ ЭТОТ БЛОК - синхронизация target при первом получении данных
+        // ИСПРАВЛЕНО: синхронизация target при первом получении данных
         QVariant targetFreq = pwmPanelWidget->rootObject()->property("targetFrequency");
         QVariant targetDuty = pwmPanelWidget->rootObject()->property("targetDuty");
 
-        if (targetFreq.toReal() == 0 && currentFrequencyKhz > 0) {
+        // Для частоты - синхронизируем если target=0 или target=current
+        if ((targetFreq.toReal() == 0 || qAbs(targetFreq.toReal() - currentFrequencyKhz) < 0.1) && currentFrequencyKhz > 0) {
             pwmPanelWidget->rootObject()->setProperty("targetFrequency", currentFrequencyKhz);
             qDebug() << "🔧 Synced targetFrequency to:" << currentFrequencyKhz;
         }
 
-        if (targetDuty.toReal() == 0 && currentDutyPercent > 0) {
-            pwmPanelWidget->rootObject()->setProperty("targetDuty", currentDutyPercent);
-            qDebug() << "🔧 Synced targetDuty to:" << currentDutyPercent;
+        // Для скважности - ИСПРАВЛЕНО: синхронизируем даже если current=0
+        // Устанавливаем targetDuty в 0, если current=0 и target еще не установлен
+        if (targetDuty.toReal() == 0) {
+            // Если currentDutyPercent > 0, ставим target равным current
+            if (currentDutyPercent > 0) {
+                pwmPanelWidget->rootObject()->setProperty("targetDuty", currentDutyPercent);
+                qDebug() << "🔧 Synced targetDuty to:" << currentDutyPercent;
+            }
+            // Если currentDutyPercent == 0, оставляем targetDuty = 0 (правильно для старта)
+            else {
+                qDebug() << "🔧 targetDuty remains 0 (starting from zero)";
+            }
         }
 
-          qDebug() << "📊 UI Updated - Freq:" << currentFrequencyKhz << "kHz, Duty:" << currentDutyPercent << "%";
+        // Принудительно обновляем режимы в QML
+        QMetaObject::invokeMethod(pwmPanelWidget->rootObject(), "updateFreqMode");
+        QMetaObject::invokeMethod(pwmPanelWidget->rootObject(), "updateDutyMode");
 
-
-
-
-
-        qDebug() << "📊 RAW DATA - timerArr:" << timerArr << "pwmRaw:" << pwmRaw;
-    }else {
-        qDebug() << "⚠️ pwmPanelWidget or rootObject is null!";
+        qDebug() << "📊 UI Updated - Freq:" << currentFrequencyKhz << "kHz, Duty:" << currentDutyPercent << "%";
     }
 
-
-    /*
-    // Рассчитываем мощность
-    currentPower = currentSpeed * 2.5;
-    if (currentPower > 10000) currentPower = 10000;
-
-    // Рассчитываем ток (А) = мощность / напряжение
-    currentTorque = currentPower / 220;
-    if (currentTorque > 20) currentTorque = 20;
-
-    // КПД (упрощенный расчет)
-    if (currentSpeed > 0) {
-        currentEfficiency = 75 + (currentSpeed / 100);
-        if (currentEfficiency > 95) currentEfficiency = 95;
-    } else {
-        currentEfficiency = 0;
-    }
-
-    // Накопленная энергия (Вт*ч)
-    static QElapsedTimer energyTimer;
-    if (!energyTimer.isValid()) {
-        energyTimer.start();
-    } else {
-        qint64 elapsedMs = energyTimer.restart();
-        double hours = elapsedMs / 3600000.0;
-        currentEnergy += currentPower * hours;
-        if (currentEnergy > 100000) currentEnergy = 100000;
-    }
-
-    // Расчетная температура
-    currentCalculatedTemp = 25.0 + (currentPower / 500.0);
-    if (currentCalculatedTemp > 80) currentCalculatedTemp = 80;
-
-    // Расчетная емкость
-    currentCalculatedCapacity = (currentTorque * (currentSpeed / 1000)) / 10;
-    if (currentCalculatedCapacity > 100) currentCalculatedCapacity = 100;
-
-    // Расчетное напряжение
-    currentCalculatedVoltage = 220.0 - (currentTorque * 0.5);
-    if (currentCalculatedVoltage < 200) currentCalculatedVoltage = 200;
-*/
     qDebug() << "🔄 BLDC Data Updated - RPM:" << currentSpeed
-             << "Power:" << currentPower
-             << "Current:" << currentTorque
              << "TIMER_ARR:" << timerArr
              << "PWM:" << pwmRaw << "(" << pwmPercent << "%)"
              << "Freq:" << frequencyKhz << "kHz";
 
-    // Обновляем спидометр и индикаторы
     updateSpeed(currentSpeed);
     updatePower(currentPower);
     updateTorque(currentTorque);
