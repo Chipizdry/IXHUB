@@ -29,6 +29,7 @@ public:
     static constexpr quint16 REG_PWM_CH2 = 0x0005;      // PWM значение канал 2 (TIM1->CCR2)
     static constexpr quint16 REG_PWM_CH3 = 0x0006;      // PWM значение канал 3 (TIM1->CCR3)
     static constexpr quint16 REG_STATUS = 0x0007;       // Статус (coils, auto_mode, pwr_on)
+    static constexpr quint16 REG_PWM_GEN = 0x0008;      // PWM значение в режиме генерации
 
     // Диапазоны
     static constexpr quint16 PWM_MIN = 0;

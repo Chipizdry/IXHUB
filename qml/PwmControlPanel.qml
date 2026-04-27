@@ -39,7 +39,7 @@ Rectangle {
     }
 
     function dutyMatch() {
-        return Math.abs(targetDuty - currentDuty) < 0.1
+        return Math.abs(targetDuty - currentDuty) < 0.5
     }
 
     function updateFreqMode() {

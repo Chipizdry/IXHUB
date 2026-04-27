@@ -43,8 +43,6 @@ private slots:
     void onBldcDataUpdated();
     // Слот для контроллера ШИМ
     void onPwmTargetChanged(qreal value);
-    void updatePwm(int value);
-
     void onFrequencyTargetChanged(qreal value);
     void onDutyTargetChanged(qreal value);
     void onStopRequested();
