@@ -61,6 +61,7 @@ public:
     void setAutoMode(bool enabled);
     void setPowerOn(bool on);
     void setSpeed(quint16 rpm);            // Установка целевых оборотов
+    void setBldcMode(bool genMode);
 
     void readAllRegisters();
 
@@ -97,10 +98,12 @@ private:
     quint16 m_targetPwm;       // Целевое значение ШИМ (0x0004)
     quint16 m_targetTimerArr;  // Целевой период таймера (0x0003)
     quint8  m_targetStatus;    // Целевой статус (0x0007)
+    quint16 m_targetPwmGen;
 
     bool m_pwmDirty;
     bool m_timerArrDirty;
     bool m_statusDirty;
+    bool m_pwmGenDirty;
 
     QTimer* m_writeTimer;
     static constexpr int WRITE_DEBOUNCE_MS = 50;
@@ -112,8 +115,9 @@ private:
     bool m_coil4;
     bool m_autoMode;
     bool m_powerOn;
+    bool m_bldcMode;
 
-    static constexpr int NUM_REGISTERS = 8;  // Читаем 8 регистров (0x0000 - 0x0007)
+    static constexpr int NUM_REGISTERS = 9;  // Читаем 9 регистров (0x0000 - 0x0008)
 };
 
 #endif // BLDC_DRIVER_DEVICE_H

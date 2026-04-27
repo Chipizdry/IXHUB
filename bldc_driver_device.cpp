@@ -20,6 +20,7 @@ constexpr quint16 BldcDriverDevice::REG_PWM_CH1;
 constexpr quint16 BldcDriverDevice::REG_PWM_CH2;
 constexpr quint16 BldcDriverDevice::REG_PWM_CH3;
 constexpr quint16 BldcDriverDevice::REG_STATUS;
+constexpr quint16 BldcDriverDevice::REG_PWM_GEN;
 
 constexpr quint16 BldcDriverDevice::PWM_MIN;
 constexpr quint16 BldcDriverDevice::PWM_MAX;
@@ -49,6 +50,7 @@ BldcDriverDevice::BldcDriverDevice(int slaveId, QObject *parent)
     , m_coil4(false)
     , m_autoMode(false)
     , m_powerOn(false)
+    , m_bldcMode(false)
 {
     qDebug() << "BldcDriverDevice created: slaveId=" << slaveId;
 
@@ -186,6 +188,7 @@ void BldcDriverDevice::updateFromStatusByte()
     m_coil4 = (m_statusByte >> 4) & 0x01;
     m_autoMode = (m_statusByte >> 5) & 0x01;
     m_powerOn = (m_statusByte >> 6) & 0x01;
+    m_bldcMode =(m_statusByte >> 7) & 0x01;
 
     qDebug() << QString("  Status: Coils=%1%2%3%4, Auto=%5, Power=%6")
                 .arg(m_coil1 ? "1" : "0")
@@ -193,7 +196,8 @@ void BldcDriverDevice::updateFromStatusByte()
                 .arg(m_coil3 ? "1" : "0")
                 .arg(m_coil4 ? "1" : "0")
                 .arg(m_autoMode ? "ON" : "OFF")
-                .arg(m_powerOn ? "ON" : "OFF");
+                .arg(m_powerOn ? "ON" : "OFF")
+                .arg(m_bldcMode ? "ON" : "OFF");
 }
 
 // ==================== ОСНОВНОЙ МЕТОД ОБРАБОТКИ ====================
@@ -258,6 +262,10 @@ void BldcDriverDevice::markDirty(quint16 regAddr, quint16 value)
         case REG_STATUS:
             m_targetStatus = static_cast<quint8>(value);
             break;
+        case REG_PWM_GEN:
+            m_targetPwmGen = value;
+            m_pwmGenDirty = true;
+            break;
         default:
             break;
     }
@@ -281,7 +289,7 @@ void BldcDriverDevice::onWriteTimerTimeout()
     QList<quint16> values;
 
     // ВСЕГДА пишем регистры 0x0003, 0x0004, 0x0005, 0x0006, 0x0007 одной командой
-    // Это соответствует прошивке: rcv_data_reg[3], rcv_data_reg[4], rcv_data_reg[5], rcv_data_reg[6], rcv_data_reg[7]
+    // Это соответствует прошивке: rcv_data_reg[3], rcv_data_reg[4], rcv_data_reg[5], rcv_data_reg[6], rcv_data_reg[7],rcv_data_reg[]
 
     // Регистр 0x0003: TIMER_ARR
     addresses.append(REG_TIMER_ARR);  // 0x0003
@@ -307,6 +315,10 @@ void BldcDriverDevice::onWriteTimerTimeout()
     addresses.append(REG_STATUS);  // 0x0007
     values.append(m_targetStatus);
     qDebug() << "BLDC: Queue STATUS write (0x0007): 0x" << QString::number(m_targetStatus, 16);
+
+    addresses.append(REG_PWM_GEN); //0x0008
+    values.append(m_targetPwmGen);
+    qDebug() << "BLDC: Queue PWM_GEN write (0x0008):" << QString::number(m_targetPwmGen, 16);
 
     if (!addresses.isEmpty()) {
         QByteArray command = generateWriteMultipleCommand(addresses, values);
@@ -343,6 +355,7 @@ quint8 BldcDriverDevice::getStatusByte() const
     if (m_coil4) result |= (1 << 4);
     if (m_autoMode) result |= (1 << 5);
     if (m_powerOn) result |= (1 << 6);
+    if (m_bldcMode)result |= (1 << 7);
     return result;
 }
 
@@ -381,6 +394,15 @@ void BldcDriverDevice::setPowerOn(bool on)
     m_powerOn = on;
     setStatus(getStatusByte());
 }
+
+void BldcDriverDevice::setBldcMode(bool genMode)
+{
+    qDebug() << "BLDC: Mode:" << (genMode ? "GENERATOR" : "DRIVE");
+
+    m_bldcMode = genMode;
+    setStatus(getStatusByte());
+}
+
 
 void BldcDriverDevice::readAllRegisters()
 {
