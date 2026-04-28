@@ -57,6 +57,7 @@ public:
     // Управление двигателем
     void setTargetPwm(quint16 value);      // Установка PWM (все три канала)
     void setTimerArr(quint16 value);       // Установка периода таймера
+    void setPwmGen(quint16 value);
     void setStatus(quint8 status);         // Установка статуса
     void setAutoMode(bool enabled);
     void setPowerOn(bool on);
@@ -70,6 +71,7 @@ public:
     quint16 getTimerArr() const { return m_timerArr; }
     quint16 getPwmValue() const { return m_pwmValue; }
     quint16 getRpm() const { return m_rpm; }
+    quint16 getPwmGen() const { return m_targetPwmGen; }
     bool getPowerOn() const { return m_powerOn; }
     quint8 getStatusByte() const;
 
@@ -99,6 +101,7 @@ private:
     quint16 m_targetTimerArr;  // Целевой период таймера (0x0003)
     quint8  m_targetStatus;    // Целевой статус (0x0007)
     quint16 m_targetPwmGen;
+    quint16 m_pwmGenValue;
 
     bool m_pwmDirty;
     bool m_timerArrDirty;
@@ -107,7 +110,7 @@ private:
 
     QTimer* m_writeTimer;
     static constexpr int WRITE_DEBOUNCE_MS = 50;
-
+    static constexpr int NUM_REGISTERS = 9;  // Читаем 9 регистров (0x0000 - 0x0008)
     // Состояния (из регистра 0x0007)
     bool m_coil1;
     bool m_coil2;
@@ -116,8 +119,8 @@ private:
     bool m_autoMode;
     bool m_powerOn;
     bool m_bldcMode;
+    bool m_genMode;
 
-    static constexpr int NUM_REGISTERS = 9;  // Читаем 9 регистров (0x0000 - 0x0008)
 };
 
 #endif // BLDC_DRIVER_DEVICE_H
