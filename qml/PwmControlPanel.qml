@@ -6,8 +6,8 @@ import QtQuick.Controls 2.12
 
 Rectangle {
     id: root
-    width: 420
-    height: 260  // Увеличена высота для размещения кнопки
+    width: 410
+    height: 260
     color: "transparent"
 
     // Свойства для частоты ШИМ (TIM1->ARR)
@@ -17,8 +17,9 @@ Rectangle {
     property real maxFrequency: 60
     property real frequencyStep: 0.1
 
-    // Свойства для скважности (заполнения)
-    property real targetDuty: 0
+    // РАЗДЕЛЬНЫЕ свойства для скважности в разных режимах
+    property real targetDutyMotor: 0      // Для режима MOTOR (ЗАРЯД)
+    property real targetDutyGen: 0        // Для режима GENERATOR (РАЗРЯД)
     property real currentDuty: 0
     property real minDuty: 0
     property real maxDuty: 100
@@ -27,15 +28,18 @@ Rectangle {
     // Свойство режима работы
     property bool isGenMode: false      // false = Мотор, true = Генератор
 
+    // Вспомогательное свойство для отображения текущей target скважности
+    property real targetDuty: isGenMode ? targetDutyGen : targetDutyMotor
+
     // Режимы отображения
     property bool isFreqTargetMode: false
     property bool isDutyTargetMode: false
 
     // Сигналы
     signal frequencyTargetChanged(real value)
-    signal dutyTargetChanged(real value)
+    signal dutyTargetChanged(real value)  // Отправляет текущее значение в зависимости от режима
     signal stopRequested()
-    signal modeToggleRequested(bool genMode)  // Новый сигнал переключения режима
+    signal modeToggleRequested(bool genMode)
 
     function freqMatch() {
         return Math.abs(targetFrequency - currentFrequency) < 0.1
@@ -55,7 +59,21 @@ Rectangle {
 
     // Функция для внешнего обновления режима
     function setGenMode(genMode) {
-        isGenMode = genMode
+        if (isGenMode !== genMode) {
+            isGenMode = genMode
+            // При смене режима отправляем текущее значение target для нового режима
+            root.dutyTargetChanged(targetDuty)
+            updateDutyMode()
+        }
+    }
+
+    // Функция для установки значений скважности извне
+    function setDutyValues(motorDuty, genDuty) {
+        targetDutyMotor = motorDuty
+        targetDutyGen = genDuty
+        // Обновляем отображение
+        root.dutyTargetChanged(targetDuty)
+        updateDutyMode()
     }
 
     onTargetFrequencyChanged: updateFreqMode()
@@ -204,7 +222,11 @@ Rectangle {
                         onClicked: {
                             var newVal = targetDuty - dutyStep
                             if (newVal >= minDuty) {
-                                targetDuty = newVal
+                                if (isGenMode) {
+                                    targetDutyGen = newVal
+                                } else {
+                                    targetDutyMotor = newVal
+                                }
                                 root.dutyTargetChanged(targetDuty)
                             }
                         }
@@ -213,7 +235,11 @@ Rectangle {
                             onTriggered: {
                                 var newVal = targetDuty - dutyStep
                                 if (newVal >= minDuty) {
-                                    targetDuty = newVal
+                                    if (isGenMode) {
+                                        targetDutyGen = newVal
+                                    } else {
+                                        targetDutyMotor = newVal
+                                    }
                                     root.dutyTargetChanged(targetDuty)
                                 }
                             }
@@ -267,7 +293,11 @@ Rectangle {
                         onClicked: {
                             var newVal = targetDuty + dutyStep
                             if (newVal <= maxDuty) {
-                                targetDuty = newVal
+                                if (isGenMode) {
+                                    targetDutyGen = newVal
+                                } else {
+                                    targetDutyMotor = newVal
+                                }
                                 root.dutyTargetChanged(targetDuty)
                             }
                         }
@@ -276,7 +306,11 @@ Rectangle {
                             onTriggered: {
                                 var newVal = targetDuty + dutyStep
                                 if (newVal <= maxDuty) {
-                                    targetDuty = newVal
+                                    if (isGenMode) {
+                                        targetDutyGen = newVal
+                                    } else {
+                                        targetDutyMotor = newVal
+                                    }
                                     root.dutyTargetChanged(targetDuty)
                                 }
                             }
@@ -297,7 +331,7 @@ Rectangle {
 
                 Text {
                     anchors.centerIn: parent
-                    text: isGenMode ? "РЕЖИМ: ГЕНЕРАТОР" : "РЕЖИМ: МОТОР"
+                    text: isGenMode ? "РЕЖИМ: РАЗРЯД" : "РЕЖИМ: ЗАРЯД"
                     color: "white"
                     font.pixelSize: 14
                     font.bold: true
@@ -308,8 +342,12 @@ Rectangle {
                     anchors.fill: parent
                     onClicked: {
                         isGenMode = !isGenMode
+                        // Отправляем текущее значение target для нового режима
+                        root.dutyTargetChanged(targetDuty)
                         root.modeToggleRequested(isGenMode)
-                        console.log("Mode toggled to:", isGenMode ? "GENERATOR" : "MOTOR")
+                        updateDutyMode()
+                        console.log("Mode toggled to:", isGenMode ? "РАЗРЯД" : "ЗАРЯД",
+                                    "Duty:", targetDuty, "%")
                     }
                 }
             }
@@ -329,7 +367,12 @@ Rectangle {
                 MouseArea {
                     id: stopButton; anchors.fill: parent
                     onClicked: {
-                        targetDuty = 0
+                        // Обнуляем скважность в текущем режиме
+                        if (isGenMode) {
+                            targetDutyGen = 0
+                        } else {
+                            targetDutyMotor = 0
+                        }
                         root.dutyTargetChanged(0)
                         root.stopRequested()
                         console.log("STOP pressed - duty set to 0")
@@ -339,5 +382,6 @@ Rectangle {
         }
     }
 }
+
 
 

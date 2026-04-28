@@ -53,7 +53,6 @@ MainWindow::MainWindow(QWidget *parent)
     , torqueWidget(nullptr)
     , powerButtonWidget(nullptr)
     , m_chartWidget(nullptr)
-  //  , pwmControlWidget(nullptr)
     , pwmPanelWidget(nullptr)
     , m_relayDevice(nullptr)
     , m_bldcDevice(nullptr)
@@ -178,7 +177,7 @@ MainWindow::MainWindow(QWidget *parent)
     currentDutyPercent = 0;
 
     pwmPanelWidget = new QQuickWidget(infoTab);
-    pwmPanelWidget->setFixedSize(290, 190);
+    pwmPanelWidget->setFixedSize(270, 190);
     pwmPanelWidget->setResizeMode(QQuickWidget::SizeRootObjectToView);
 
     QQmlContext *panelContext = pwmPanelWidget->rootContext();
@@ -204,6 +203,8 @@ MainWindow::MainWindow(QWidget *parent)
                 this, SLOT(onFrequencyTargetChanged(qreal)));
         connect(panelRoot, SIGNAL(dutyTargetChanged(qreal)),
                 this, SLOT(onDutyTargetChanged(qreal)));
+        connect(panelRoot, SIGNAL(modeToggleRequested(bool)),
+                   this, SLOT(onModeToggleRequested(bool)));
         connect(panelRoot, SIGNAL(stopRequested()),
                 this, SLOT(onStopRequested()));
         qDebug() << "✅ PWM Panel signals connected";
@@ -405,6 +406,7 @@ void MainWindow::onBldcCommandGenerated(const QByteArray& command)
     }
 }
 
+
 void MainWindow::onBldcDataUpdated()
 {
     if (!m_bldcDevice) return;
@@ -414,43 +416,56 @@ void MainWindow::onBldcDataUpdated()
     currentSpeed = m_bldcDevice->getRpm();
     quint16 timerArr = m_bldcDevice->getTimerArr();
     quint16 pwmRaw = m_bldcDevice->getPwmValue();
+    quint16 pwmGenRaw = m_bldcDevice->getPwmGen();
 
     int pwmPercent = 0;
+    int pwmGenPercent = 0;
     qreal frequencyKhz = 0;
 
     if (timerArr > 0) {
         pwmPercent = (pwmRaw * 100) / timerArr;
+        pwmGenPercent = (pwmGenRaw * 100) / timerArr;
         frequencyKhz = 36000.0 / (timerArr + 1);
     }
 
-   currentPwm = pwmPercent;
-
+    currentPwm = pwmPercent;
     currentFrequencyKhz = frequencyKhz;
-    currentDutyPercent = pwmPercent;
+
+    // Определяем текущий режим
+    bool isGenMode = m_bldcDevice->getBldcMode();
+
+    if (isGenMode) {
+        currentDutyPercent = pwmGenPercent;
+        qDebug() << "📊 GEN Mode - Current PWM_GEN:" << currentDutyPercent << "%";
+    } else {
+        currentDutyPercent = pwmPercent;
+        qDebug() << "📊 MOTOR Mode - Current PWM:" << currentDutyPercent << "%";
+    }
 
     if (pwmPanelWidget && pwmPanelWidget->rootObject()) {
         pwmPanelWidget->rootObject()->setProperty("currentFrequency", currentFrequencyKhz);
         pwmPanelWidget->rootObject()->setProperty("currentDuty", currentDutyPercent);
+        pwmPanelWidget->rootObject()->setProperty("isGenMode", isGenMode);
 
-        // ТОЛЬКО для частоты: синхронизация target при первом получении
+        // Синхронизация target значений при первом получении
         QVariant targetFreq = pwmPanelWidget->rootObject()->property("targetFrequency");
         if (targetFreq.toReal() == 0 && currentFrequencyKhz > 0) {
             pwmPanelWidget->rootObject()->setProperty("targetFrequency", currentFrequencyKhz);
             qDebug() << "🔧 Synced targetFrequency to:" << currentFrequencyKhz;
         }
 
-        // Для скважности: если targetDuty = 0 и currentDuty > 0, синхронизируем
-        QVariant targetDuty = pwmPanelWidget->rootObject()->property("targetDuty");
-        if (targetDuty.toReal() == 0 && currentDutyPercent > 0) {
-            pwmPanelWidget->rootObject()->setProperty("targetDuty", currentDutyPercent);
-            qDebug() << "🔧 Synced targetDuty to:" << currentDutyPercent;
-        }
+        // Обновляем раздельные значения в QML
+        QMetaObject::invokeMethod(pwmPanelWidget->rootObject(), "setDutyValues",
+            Q_ARG(QVariant, motorDutyPercent),
+            Q_ARG(QVariant, genDutyPercent));
 
         // Принудительно обновляем режимы в QML
         QMetaObject::invokeMethod(pwmPanelWidget->rootObject(), "updateFreqMode");
         QMetaObject::invokeMethod(pwmPanelWidget->rootObject(), "updateDutyMode");
 
-        qDebug() << "📊 UI Updated - Freq:" << currentFrequencyKhz << "kHz, Duty:" << currentDutyPercent << "%";
+        qDebug() << "📊 UI Updated - Mode:" << (isGenMode ? "GEN" : "MOTOR")
+                 << "Freq:" << currentFrequencyKhz << "kHz"
+                 << "Duty:" << currentDutyPercent << "%";
     }
 
     updateSpeed(currentSpeed);
@@ -628,65 +643,173 @@ void MainWindow::onFrequencyTargetChanged(qreal value)
              << "PWM preserved at:" << currentPwmPercent << "% (new PWM:" << newPwmValue << ")";
 }
 
-
 void MainWindow::onDutyTargetChanged(qreal value)
 {
-    targetDutyPercent = value;
-    targetPwm = static_cast<int>(value);
-
-    qDebug() << "🎯 Target duty changed to:" << targetDutyPercent << "%";
+    qDebug() << "🎯 Target duty changed to:" << value << "%";
 
     if (!m_bldcDevice) {
         qDebug() << "⚠️ BLDC driver not available";
         return;
     }
 
-    // Обновляем target в QML панели
+    // Получаем текущий режим из QML
+    bool isGenMode = false;
     if (pwmPanelWidget && pwmPanelWidget->rootObject()) {
-        pwmPanelWidget->rootObject()->setProperty("targetDuty", targetDutyPercent);
-        QMetaObject::invokeMethod(pwmPanelWidget->rootObject(), "updateDutyMode");
-        qDebug() << "✅ Updated QML targetDuty to:" << targetDutyPercent;
+        isGenMode = pwmPanelWidget->rootObject()->property("isGenMode").toBool();
     }
 
+    // Сохраняем значение для текущего режима
+    if (isGenMode) {
+        genDutyPercent = value;
+        qDebug() << "💾 Saved GEN duty:" << genDutyPercent << "%";
+    } else {
+        motorDutyPercent = value;
+        qDebug() << "💾 Saved MOTOR duty:" << motorDutyPercent << "%";
+    }
 
+    if (!powerButtonWidget || !powerButtonWidget->rootObject()) {
+        qDebug() << "⚠️ Power button widget not available";
+        return;
+    }
+
+    bool isOn = powerButtonWidget->rootObject()->property("isOn").toBool();
+    bool isBlinking = powerButtonWidget->rootObject()->property("isBlinking").toBool();
+
+    if (isOn && !isBlinking) {
+        quint16 timerArr = m_bldcDevice->getTimerArr();
+        if (timerArr == 0) {
+            timerArr = 1799;  // Значение по умолчанию для 20 кГц
+        }
+
+        quint16 pwmValue = 0;
+
+        if (isGenMode) {
+            // В режиме генератора используем регистр PWM_GEN (0x0008)
+            pwmValue = static_cast<quint16>((value * timerArr) / 100);
+            m_bldcDevice->setPwmGen(pwmValue);
+            qDebug() << "📤 GEN mode: PWM_GEN =" << pwmValue << "(" << value << "%)";
+        } else {
+            // В режиме мотора используем стандартный PWM (0x0004)
+            pwmValue = static_cast<quint16>((value * timerArr) / 100);
+            m_bldcDevice->setTargetPwm(pwmValue);
+            qDebug() << "📤 MOTOR mode: PWM_CH1 =" << pwmValue << "(" << value << "%)";
+        }
+
+        m_bldcDevice->flushWriteCache();
+    } else {
+        qDebug() << "⚠️ System is OFF or starting, duty command not sent";
+    }
+}
+
+
+
+void MainWindow::onModeToggleRequested(bool genMode)
+{
+    qDebug() << "🔄 Mode toggle requested:" << (genMode ? "РАЗРЯД (GENERATOR)" : "ЗАРЯД (MOTOR)");
+
+    if (!m_bldcDevice) {
+        qDebug() << "⚠️ BLDC driver not available";
+        return;
+    }
+
+    // Получаем текущий статус из драйвера
+    quint8 currentStatus = m_bldcDevice->getStatusByte();
+    qDebug() << "📊 Current status byte: 0x" << QString::number(currentStatus, 16);
+
+    // Устанавливаем режим в драйвере (это изменит бит bldc_mode в статусе)
+    m_bldcDevice->setBldcMode(genMode);
+
+    // Получаем новый статус для проверки
+    quint8 newStatus = m_bldcDevice->getStatusByte();
+    qDebug() << "📊 New status byte: 0x" << QString::number(newStatus, 16);
+
+    // Отправляем изменённый статус в драйвер вместе с другими регистрами
+    m_bldcDevice->flushWriteCache();
+
+    // Дополнительно: принудительно читаем регистры, чтобы убедиться, что команда прошла
+    QTimer::singleShot(100, this, [this]() {
+        if (m_bldcDevice) {
+            m_bldcDevice->readAllRegisters();
+            qDebug() << "📖 Forced read after mode change";
+        }
+    });
+
+    // Отправляем соответствующее значение PWM в зависимости от режима
     quint16 timerArr = m_bldcDevice->getTimerArr();
     if (timerArr == 0) {
         timerArr = 1799;  // Значение по умолчанию для 20 кГц
-        qDebug() << "⚠️ timerArr was 0, using default:" << timerArr;
     }
 
-    quint16 pwmValue = static_cast<quint16>((value * timerArr) / 100);
+    // Получаем сохранённые значения из QML
+    bool isGenMode = genMode;
+    if (pwmPanelWidget && pwmPanelWidget->rootObject()) {
+        if (isGenMode) {
+            // Режим GENERATOR - используем PWM_GEN
+            QVariant genDuty = pwmPanelWidget->rootObject()->property("targetDutyGen");
+            qreal dutyPercent = genDuty.toReal();
+            quint16 pwmValue = static_cast<quint16>((dutyPercent * timerArr) / 100);
+            m_bldcDevice->setPwmGen(pwmValue);
+            qDebug() << "📤 Set GEN PWM_GEN =" << pwmValue << "(" << dutyPercent << "%)";
+        } else {
+            // Режим MOTOR - используем стандартный PWM
+            QVariant motorDuty = pwmPanelWidget->rootObject()->property("targetDutyMotor");
+            qreal dutyPercent = motorDuty.toReal();
+            quint16 pwmValue = static_cast<quint16>((dutyPercent * timerArr) / 100);
+            m_bldcDevice->setTargetPwm(pwmValue);
+            qDebug() << "📤 Set MOTOR PWM_CH1 =" << pwmValue << "(" << dutyPercent << "%)";
+        }
+        m_bldcDevice->flushWriteCache();
+    }
 
-    qDebug() << "📊 PWM calculation: duty=" << value << "%, ARR=" << timerArr << "→ PWM=" << pwmValue;
-
-    m_bldcDevice->setTargetPwm(pwmValue);
-    m_bldcDevice->flushWriteCache();
-
-    qDebug() << "📤 Duty sent, PWM:" << pwmValue << "(" << value << "%)";
+    qDebug() << "✅ Mode switch command sent to driver:" << (genMode ? "GENERATOR" : "MOTOR");
 }
+
+
+
 
 
 
 void MainWindow::onStopRequested()
 {
-    qDebug() << "🛑 STOP requested - setting PWM to 0";
-    targetDutyPercent = 0;
+    qDebug() << "🛑 STOP requested - setting duty to 0";
 
+    // Обнуляем значение в зависимости от режима
+    bool isGenMode = false;
     if (pwmPanelWidget && pwmPanelWidget->rootObject()) {
-        pwmPanelWidget->rootObject()->setProperty("targetDuty", 0);
-        QMetaObject::invokeMethod(pwmPanelWidget->rootObject(), "updateDutyMode");
+        isGenMode = pwmPanelWidget->rootObject()->property("isGenMode").toBool();
     }
 
+    if (isGenMode) {
+        genDutyPercent = 0;
+        if (pwmPanelWidget && pwmPanelWidget->rootObject()) {
+            pwmPanelWidget->rootObject()->setProperty("targetDutyGen", 0);
+        }
+    } else {
+        motorDutyPercent = 0;
+        if (pwmPanelWidget && pwmPanelWidget->rootObject()) {
+            pwmPanelWidget->rootObject()->setProperty("targetDutyMotor", 0);
+        }
+    }
 
     if (!m_bldcDevice) {
         qDebug() << "⚠️ BLDC driver not available";
         return;
     }
 
-    m_bldcDevice->setTargetPwm(0);
+    // Отправляем команду STOP
+    if (isGenMode) {
+        m_bldcDevice->setPwmGen(0);
+    } else {
+        m_bldcDevice->setTargetPwm(0);
+    }
     m_bldcDevice->flushWriteCache();
 
-    qDebug() << "📤 PWM set to 0 and sent";
+    // Обновляем отображение
+    if (pwmPanelWidget && pwmPanelWidget->rootObject()) {
+        QMetaObject::invokeMethod(pwmPanelWidget->rootObject(), "updateDutyMode");
+    }
+
+    qDebug() << "📤 STOP sent - duty set to 0 in" << (isGenMode ? "GEN" : "MOTOR") << "mode";
 }
 
 
