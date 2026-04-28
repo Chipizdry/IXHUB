@@ -178,7 +178,7 @@ MainWindow::MainWindow(QWidget *parent)
     currentDutyPercent = 0;
 
     pwmPanelWidget = new QQuickWidget(infoTab);
-    pwmPanelWidget->setFixedSize(290, 160);
+    pwmPanelWidget->setFixedSize(290, 190);
     pwmPanelWidget->setResizeMode(QQuickWidget::SizeRootObjectToView);
 
     QQmlContext *panelContext = pwmPanelWidget->rootContext();

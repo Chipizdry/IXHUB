@@ -7,7 +7,7 @@ import QtQuick.Controls 2.12
 Rectangle {
     id: root
     width: 420
-    height: 210  // Увеличена высота для размещения кнопки
+    height: 260  // Увеличена высота для размещения кнопки
     color: "transparent"
 
     // Свойства для частоты ШИМ (TIM1->ARR)
