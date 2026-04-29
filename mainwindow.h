@@ -46,8 +46,6 @@ private slots:
     void onFrequencyTargetChanged(qreal value);
     void onDutyTargetChanged(qreal value);
     void onModeToggleRequested(bool genMode);
-   // void onMotorDutyTargetChanged(qreal value);  // Для режима MOTOR
-   // void onGenDutyTargetChanged(qreal value);    // Для режима GENERATOR
     void onStopRequested();
 
 

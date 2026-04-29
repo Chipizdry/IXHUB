@@ -132,8 +132,11 @@ void BldcDriverDevice::parseHoldingRegisters(const QByteArray& data)
     }
 
     const QByteArray regData = data.mid(3, byteCount);
-    qDebug() << "BldcDriverDevice: Register data size:" << regData.size()
-             << "bytes, hex:" << regData.toHex();
+    qDebug() << "=== Register dump ===";
+    for (int i = 0; i < regData.size(); i += 2) {
+        quint16 val = (static_cast<quint8>(regData[i]) << 8) | static_cast<quint8>(regData[i+1]);
+        qDebug() << QString("reg[%1] = 0x%2 (%3)").arg(i/2).arg(val, 4, 16, QChar('0')).arg(val);
+    }
 
     // Проверяем, что получили все 9 регистров (18 байт)
     if (regData.size() >= 18) {
@@ -150,8 +153,8 @@ void BldcDriverDevice::parseHoldingRegisters(const QByteArray& data)
         // data_reg[4]: PWM_CH1 (смещение 8 байт)
         m_pwmValue = (static_cast<quint8>(regData[8]) << 8) | static_cast<quint8>(regData[9]);
 
-        // data_reg[7]: STATUS - В ПРОШИВКЕ НЕ ЗАПОЛНЯЕТСЯ! (смещение 14 байт)
-        m_statusByte = static_cast<quint8>(regData[14]);
+        // data_reg[7]: STATUS (смещение 15 байт)
+        m_statusByte = static_cast<quint8>(regData[15]);
 
         // data_reg[8]: PWM_GEN (смещение 16 байт)
         m_targetPwmGen = (static_cast<quint8>(regData[16]) << 8) | static_cast<quint8>(regData[17]);
@@ -365,7 +368,8 @@ void BldcDriverDevice::onWriteTimerTimeout()
     values.append(m_targetPwm);
 
     addresses.append(REG_STATUS);     // 0x0007
-    values.append(m_targetStatus);
+    //values.append(m_targetStatus);
+    values.append(static_cast<quint16>(m_targetStatus));
 
     addresses.append(REG_PWM_GEN);    // 0x0008
     values.append(m_targetPwmGen);
@@ -396,9 +400,9 @@ void BldcDriverDevice::flushWriteCache()
 }
 
 // ==================== ПУБЛИЧНЫЕ МЕТОДЫ УПРАВЛЕНИЯ ====================
-quint8 BldcDriverDevice::getStatusByte() const
+ uint16_t BldcDriverDevice::getStatusByte() const
 {
-    quint8 result = 0;
+     uint16_t result = 0;
     // Биты строго как в прошивке (rcv_data_reg[7])
     if (m_coil1) result |= (1 << 1);
     if (m_coil2) result |= (1 << 2);
@@ -407,7 +411,6 @@ quint8 BldcDriverDevice::getStatusByte() const
     if (m_autoMode) result |= (1 << 5);
     if (m_powerOn) result |= (1 << 6);
     if (m_bldcMode) result |= (1 << 7);
-    // Бит 0 не используется
     return result;
 }
 

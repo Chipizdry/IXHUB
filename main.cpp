@@ -54,6 +54,7 @@ void setupDefaultDevices() {
         dm.addDevice(powerRelay);
 
     // Релейный модуль для системы охлаждения (адрес 2)
+        /*
        RelayDevice* coolingRelay = new RelayDevice(0x0A);
        coolingRelay->setRole(RelayDevice::ROLE_COOLING_SYSTEM);
        coolingRelay->setName("Cooling_System_Unit");
@@ -61,14 +62,16 @@ void setupDefaultDevices() {
        coolingRelay->setRelayName(1, "Water_Pump");
        coolingRelay->setRelayName(2, "Radiator_Fan");
        dm.addDevice(coolingRelay);
+     */
 
-    //dm.addDevice(new RelayDevice(1));
+
+
     dm.addDevice(new BldcDriverDevice(2));
-    dm.addDevice(new NTA8A01Device(3));
-    dm.addDevice(new NTA8A01Device(4));
-    dm.addDevice(new NTA8A01Device(5));
-    dm.addDevice(new NTA8A01Device(6));
-    dm.addDevice(new VacuumPressureSensor(0x09));
+   // dm.addDevice(new NTA8A01Device(3));
+   // dm.addDevice(new NTA8A01Device(4));
+   // dm.addDevice(new NTA8A01Device(5));
+  //  dm.addDevice(new NTA8A01Device(6));
+   // dm.addDevice(new VacuumPressureSensor(0x09));
 
     // Загружаем конфигурацию если есть
     dm.loadConfig("/etc/modbus_devices.conf");
@@ -107,7 +110,7 @@ int main(int argc, char *argv[])
     }
 
     // Запуск опроса устройств
-    poller.start(30);
+    poller.start(80);
     Logger::debug("Device poller started with interval 30ms");
 
     // Запуск главного окна

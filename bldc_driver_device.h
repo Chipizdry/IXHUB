@@ -74,7 +74,7 @@ public:
     quint16 getPwmGen() const { return m_targetPwmGen; }
     bool getPowerOn() const { return m_powerOn; }
     bool getBldcMode() const { return m_bldcMode; }
-    quint8 getStatusByte() const;
+    quint16 getStatusByte() const;
 
 signals:
     void commandGenerated(const QByteArray& command);

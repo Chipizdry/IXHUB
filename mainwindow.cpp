@@ -65,8 +65,11 @@ MainWindow::MainWindow(QWidget *parent)
     , currentPwm(0)
     , targetFrequencyKhz(0)      // Добавлено
     , currentFrequencyKhz(0)     // Добавлено
-    , targetDutyPercent(0)       // Добавлено
-    , currentDutyPercent(0)
+    , targetDutyPercent(0.0)       // Добавлено
+    , currentDutyPercent(0.0)
+    , motorDutyPercent(0.0)        // ← Добавить в .h
+    , genDutyPercent(0.0)          // ← Добавить в .h
+
 {
     ui->setupUi(this);
     // Устанавливаем вкладку "Информация" как активную по умолчанию
@@ -418,13 +421,13 @@ void MainWindow::onBldcDataUpdated()
     quint16 pwmRaw = m_bldcDevice->getPwmValue();
     quint16 pwmGenRaw = m_bldcDevice->getPwmGen();
 
-    int pwmPercent = 0;
-    int pwmGenPercent = 0;
+    double pwmPercent = 0.0;
+    double pwmGenPercent = 0.0;
     qreal frequencyKhz = 0;
 
     if (timerArr > 0) {
-        pwmPercent = (pwmRaw * 100) / timerArr;
-        pwmGenPercent = (pwmGenRaw * 100) / timerArr;
+        pwmPercent = (static_cast<double>(pwmRaw) * 100.0) / timerArr;
+        pwmGenPercent = (static_cast<double>(pwmGenRaw) * 100.0) / timerArr;
         frequencyKhz = 36000.0 / (timerArr + 1);
     }
 
@@ -685,7 +688,8 @@ void MainWindow::onDutyTargetChanged(qreal value)
 
         if (isGenMode) {
             // В режиме генератора используем регистр PWM_GEN (0x0008)
-            pwmValue = static_cast<quint16>((value * timerArr) / 100);
+           // pwmValue = static_cast<quint16>((value * timerArr) / 100);
+            quint16 pwmValue = static_cast<quint16>(qRound((value * timerArr) / 100.0));
             m_bldcDevice->setPwmGen(pwmValue);
             qDebug() << "📤 GEN mode: PWM_GEN =" << pwmValue << "(" << value << "%)";
         } else {
