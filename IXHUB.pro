@@ -28,6 +28,7 @@ DEFINES += QT_DEPRECATED_WARNINGS
 #DEFINES += QT_DISABLE_DEPRECATED_BEFORE=0x060000    # disables all the APIs deprecated before Qt 6.0.0
 
 SOURCES += \
+    EnergyMeterDevice.cpp \
     ModbusMaster.cpp \
     WSClient.cpp \
     bldc_driver_device.cpp \
@@ -38,12 +39,14 @@ SOURCES += \
     main.cpp \
     mainwindow.cpp \
     nta8a01_device.cpp \
+    pi30_command_handler.cpp \
     relay_device.cpp \
     vacuum_pressure_sensor.cpp \
     websocket_manager.cpp
 
 
 HEADERS += \
+    EnergyMeterDevice.h \
     ModbusMaster.h \
     WSClient.h \
     bldc_driver_device.h \
@@ -53,6 +56,7 @@ HEADERS += \
     logger.h \
     mainwindow.h \
     nta8a01_device.h \
+    pi30_command_handler.h \
     relay_device.h \
     vacuum_pressure_sensor.h \
     websocket_manager.h

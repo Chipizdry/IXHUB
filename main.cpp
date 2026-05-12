@@ -9,6 +9,7 @@
 #include "relay_device.h"
 #include "bldc_driver_device.h"
 #include "vacuum_pressure_sensor.h"
+#include "EnergyMeterDevice.h"
 #include "websocket_manager.h"
 #include "logger.h"
 #include <QApplication>
@@ -71,6 +72,7 @@ void setupDefaultDevices() {
    // dm.addDevice(new NTA8A01Device(4));
    // dm.addDevice(new NTA8A01Device(5));
   //  dm.addDevice(new NTA8A01Device(6));
+     dm.addDevice(new EnergyMeterDevice(8));
    // dm.addDevice(new VacuumPressureSensor(0x09));
 
     // Загружаем конфигурацию если есть

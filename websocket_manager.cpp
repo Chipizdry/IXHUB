@@ -6,6 +6,7 @@
 #include "device_manager.h"
 #include "nta8a01_device.h"
 #include "relay_device.h"
+#include "pi30_command_handler.h"
 #include <QDebug>
 #include <QDateTime>
 #include <QJsonDocument>
@@ -16,6 +17,7 @@ WebSocketManager::WebSocketManager()
     , m_poller(nullptr)
     , m_master(nullptr)
     , m_authenticated(false)
+    , m_pi30Handler(new Pi30CommandHandler(this))
 {
 }
 
@@ -135,7 +137,7 @@ void WebSocketManager::setupWSConnections()
     QObject::connect(m_ws, &WSClient::authenticated, [this]() {
         qDebug() << "✅ WebSocket authenticated";
         m_authenticated = true;
-        sendDeviceList();
+       // sendDeviceList();
     });
 
     QObject::connect(m_ws, &WSClient::disconnected, [this]() {
@@ -162,9 +164,13 @@ void WebSocketManager::setupWSConnections()
         });
 
     // Обработка PI30 данных
-    QObject::connect(m_ws, &WSClient::pi30DataReceived, [](const QString &pi30Data) {
-        qDebug() << "🔶 PI30 data received:" << pi30Data;
-    });
+    QObject::connect(m_ws, &WSClient::pi30DataReceived,
+        [this](const QString &pi30Data) {
+            qDebug() << "🔶 PI30 data received:" << pi30Data;
+            if (m_pi30Handler) {
+                m_pi30Handler->processHexData(pi30Data);
+            }
+        });
 
     // Обработка команд настроек
     QObject::connect(m_ws, &WSClient::settingsCommandReceived,
@@ -186,13 +192,13 @@ void WebSocketManager::setupPollerConnections()
     // Подключаем сигналы поллера
     QObject::connect(m_poller, &DevicePoller::deviceDataReady,
         [this](int slaveId, const QJsonObject& data) {
-            sendDeviceData(slaveId, data);
+           // sendDeviceData(slaveId, data);
             logDeviceData(slaveId, data);
         });
 
     QObject::connect(m_poller, &DevicePoller::deviceError,
         [this](int slaveId, const QString& error) {
-            sendDeviceError(slaveId, error);
+          //  sendDeviceError(slaveId, error);
         });
 }
 

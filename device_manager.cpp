@@ -6,6 +6,7 @@
 #include "relay_device.h"
 #include "bldc_driver_device.h"
 #include "vacuum_pressure_sensor.h"
+#include "EnergyMeterDevice.h"
 #include <QJsonDocument>
 #include <QJsonArray>
 #include <QJsonObject>
@@ -166,6 +167,10 @@ bool DeviceManager::loadConfig(const QString& filename)
 
             case Device::TYPE_VACUUM_SENSOR:
                 device = new VacuumPressureSensor(slaveId);
+                break;
+
+            case Device::TYPE_ENERGY_METER:
+                device = new EnergyMeterDevice(slaveId);
                 break;
 
             default:

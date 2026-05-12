@@ -18,6 +18,7 @@ public:
         TYPE_RELAY,
         TYPE_BLDC_DRIVER,
         TYPE_VACUUM_SENSOR,
+        TYPE_ENERGY_METER,
         TYPE_UNKNOWN
     };
     Q_ENUM(DeviceType)

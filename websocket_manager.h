@@ -9,6 +9,8 @@
 #include "WSClient.h"
 #include "device_poller.h"
 #include "ModbusMaster.h"
+#include "pi30_command_handler.h"
+
 
 class WebSocketManager : public QObject
 {
@@ -42,6 +44,7 @@ private:
     // Обработчики
     void handleSettingsCommand(const QString& commandType, const QJsonObject& settings);
     void logDeviceData(int slaveId, const QJsonObject& data);
+    Pi30CommandHandler* m_pi30Handler = nullptr;
 
     WSClient* m_ws;
     DevicePoller* m_poller;
