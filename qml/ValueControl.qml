@@ -6,221 +6,145 @@ import QtQuick.Controls 2.12
 
 Rectangle {
     id: root
-    width: 180
-    height: 70
+    width: 220
+    height: 150
     color: "transparent"
 
-    // Свойства компонента
-    property real targetValue: 0          // Целевое значение (устанавливается кнопками)
-    property real currentValue: 0         // Текущее значение (получаемое с платы)
-    property real minValue: 0
-    property real maxValue: 2000
-    property real step: 5                 // Шаг изменения
-    property string label: "Значение"
-    property string unit: ""
-    property bool isTargetMode: false     // Режим отображения целевого значения
+    // Свойства для внешних данных
+    property real currentValue: 0.0      // ток, А
+    property real voltageValue: 0.0      // напряжение, В
+    property real powerValue: 0.0        // мощность, Вт (может быть отрицательной)
+    property real energyWh: 0.0          // энергия, Вт·ч
 
-    // Сигнал при изменении целевого значения
-    signal pwmTargetChanged(real value)
+    // Текущий режим отображения: 0 - ток, 1 - напряжение, 2 - мощность, 3 - энергия
+    property int displayMode: 0
+    onDisplayModeChanged: updateDisplay()
 
-    // Проверка, совпадают ли значения
-    function valuesMatch() {
-        return Math.abs(targetValue - currentValue) < 0.1
+    // Внутренние переменные
+    property string displayText: "0.00"
+    property string displayUnit: "A"
+
+    // Функция форматирования числа с двумя знаками
+    function formatNumber(value) {
+        return value.toFixed(2)
     }
 
-    // Функция для обновления режима отображения
-    function updateDisplayMode() {
-        isTargetMode = (Math.abs(targetValue - currentValue) > 0.1)
+    // Обновление отображаемого значения и единиц
+    function updateDisplay() {
+        switch (displayMode) {
+        case 0: // ток
+            displayText = formatNumber(currentValue)
+            displayUnit = "A"
+            break
+        case 1: // напряжение
+            displayText = formatNumber(voltageValue)
+            displayUnit = "V"
+            break
+        case 2: // мощность
+            displayText = formatNumber(powerValue)
+            displayUnit = "W"
+            break
+        case 3: // энергия
+            if (energyWh >= 1000) {
+                displayText = formatNumber(energyWh / 1000.0)
+                displayUnit = "kWh"
+            } else {
+                displayText = formatNumber(energyWh)
+                displayUnit = "Wh"
+            }
+            break
+        }
     }
 
-    // Отслеживаем изменения значений
-    onTargetValueChanged: {
-        updateDisplayMode()
-        root.pwmTargetChanged(targetValue)
-    }
+    // При изменении любого параметра обновляем отображение (если режим соответствует)
+    onCurrentValueChanged: { if (displayMode === 0) updateDisplay() }
+    onVoltageValueChanged: { if (displayMode === 1) updateDisplay() }
+    onPowerValueChanged:   { if (displayMode === 2) updateDisplay() }
+    onEnergyWhChanged:     { if (displayMode === 3) updateDisplay() }
 
-    onCurrentValueChanged: {
-        updateDisplayMode()
-    }
-
-    Component.onCompleted: {
-        console.log("ValueControl loaded - Label:", label, "Unit:", unit)
-    }
-
-    // Фон - в стиле VerticalGauge
+    // Фоновый прямоугольник (стиль как в оригинале)
     Rectangle {
-        id: background
         anchors.fill: parent
-        anchors.margins: 2                // Уменьшенная рамка
-        radius: 8                         // Чуть меньший радиус
+        anchors.margins: 2
+        radius: 10
         color: "#2c3e50"
         border.color: "#34495e"
         border.width: 2
     }
 
-    // Основной контейнер для содержимого
-    Item {
-        anchors.fill: parent
-        anchors.margins: 8                // Отступы для содержимого
+    // Основной контент
+    Column {
+        anchors.centerIn: parent
+        spacing: 8
 
-        Row {
-            anchors.centerIn: parent
-            spacing: 8
-
-            // Кнопка уменьшения
-            Rectangle {
-                width: 45
-                height: 45
-                radius: 6
-                color: minusButton.pressed ? "#e74c3c" : "#c0392b"
-                border.color: "#e74c3c"
-                border.width: 2
-
-                Text {
-                    anchors.centerIn: parent
-                    text: "-"
-                    color: "white"
-                    font.pixelSize: 28
-                    font.bold: true
-                }
-
-                MouseArea {
-                    id: minusButton
-                    anchors.fill: parent
-                    onClicked: {
-                        var newValue = targetValue - step
-                        if (newValue >= minValue) {
-                            targetValue = newValue
-                        }
-                    }
-
-                    // Автоповтор при удержании
-                    Timer {
-                        interval: 200
-                        running: minusButton.pressed
-                        repeat: true
-                        onTriggered: {
-                            var newValue = targetValue - step
-                            if (newValue >= minValue) {
-                                targetValue = newValue
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Поле отображения значения
-            Rectangle {
-                width: 85
-                height: 45
-                radius: 6
-                color: isTargetMode ? "#f39c12" : "#34495e"
-                border.color: isTargetMode ? "#f1c40f" : "#2c3e50"
-                border.width: 2
-
-                // Анимация мигания для целевого режима
-                SequentialAnimation on color {
-                    running: isTargetMode
-                    loops: Animation.Infinite
-                    ColorAnimation { from: "#f39c12"; to: "#e67e22"; duration: 500 }
-                    ColorAnimation { from: "#e67e22"; to: "#f39c12"; duration: 500 }
-                }
-
-                Column {
-                    anchors.centerIn: parent
-                    spacing: 2
-
-                    Text {
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        text: isTargetMode ? targetValue.toFixed(0) : currentValue.toFixed(0)
-                        color: "white"
-                        font.pixelSize: 20
-                        font.bold: true
-                    }
-
-                    Text {
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        text: unit
-                        color: "#bdc3c7"
-                        font.pixelSize: 9
-                        visible: unit !== ""
-                    }
-                }
-            }
-
-            // Кнопка увеличения
-            Rectangle {
-                width: 45
-                height: 45
-                radius: 6
-                color: plusButton.pressed ? "#27ae60" : "#2ecc71"
-                border.color: "#27ae60"
-                border.width: 2
-
-                Text {
-                    anchors.centerIn: parent
-                    text: "+"
-                    color: "white"
-                    font.pixelSize: 28
-                    font.bold: true
-                }
-
-                MouseArea {
-                    id: plusButton
-                    anchors.fill: parent
-                    onClicked: {
-                        var newValue = targetValue + step
-                        if (newValue <= maxValue) {
-                            targetValue = newValue
-                        }
-                    }
-
-                    // Автоповтор при удержании
-                    Timer {
-                        interval: 200
-                        running: plusButton.pressed
-                        repeat: true
-                        onTriggered: {
-                            var newValue = targetValue + step
-                            if (newValue <= maxValue) {
-                                targetValue = newValue
-                            }
-                        }
-                    }
-                }
-            }
+        // Отображаемое значение
+        Text {
+            id: valueText
+            anchors.horizontalCenter: parent.horizontalCenter
+            text: displayText
+            color: "white"
+            font.pixelSize: 36
+            font.bold: true
+            font.family: "monospace"
         }
 
-        // Метка - в стиле VerticalGauge
+        // Единицы измерения
         Text {
-            anchors.bottom: parent.bottom
-            anchors.bottomMargin: -2
             anchors.horizontalCenter: parent.horizontalCenter
-            text: label
-            color: "#ecf0f1"
-            font.pixelSize: 9
+            text: displayUnit
+            color: "#bdc3c7"
+            font.pixelSize: 16
             font.bold: true
         }
 
-        // Индикатор совпадения значений
+        // Кнопка переключения режима
         Rectangle {
-            visible: valuesMatch() && currentValue > 0
-            width: 8
-            height: 8
-            radius: 4
-            color: "#2ecc71"
-            anchors.left: parent.left
-            anchors.top: parent.top
-            anchors.leftMargin: -2
-            anchors.topMargin: -2
+            id: switchButton
+            width: 40
+            height: 40
+            radius: 20
+            color: mouseArea.pressed ? "#2980b9" : "#3498db"
+            anchors.horizontalCenter: parent.horizontalCenter
 
-            SequentialAnimation {
-                running: valuesMatch() && currentValue > 0
-                loops: 3
-                PropertyAnimation { target: parent; property: "scale"; from: 1.0; to: 1.5; duration: 300 }
-                PropertyAnimation { target: parent; property: "scale"; from: 1.5; to: 1.0; duration: 300 }
+            Text {
+                anchors.centerIn: parent
+                text: "↻"
+                color: "white"
+                font.pixelSize: 24
+                font.bold: true
+            }
+
+            MouseArea {
+                id: mouseArea
+                anchors.fill: parent
+                onClicked: {
+                    displayMode = (displayMode + 1) % 4
+                }
             }
         }
+    }
+
+    // Метка (опционально)
+    Text {
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: 6
+        anchors.horizontalCenter: parent.horizontalCenter
+        text: {
+            switch (displayMode) {
+                case 0: return "Ток"
+                case 1: return "Напряжение"
+                case 2: return "Мощность"
+                case 3: return "Энергия"
+            }
+        }
+        color: "#ecf0f1"
+        font.pixelSize: 10
+        font.bold: true
+    }
+
+    Component.onCompleted: {
+        updateDisplay()
+        console.log("ElectricalMonitor ready")
     }
 }
 

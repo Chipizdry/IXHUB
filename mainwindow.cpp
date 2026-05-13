@@ -221,8 +221,16 @@ MainWindow::MainWindow(QWidget *parent)
      }
 
 
+    // ========== 7. Электрический монитор (ток, напряжение, мощность, энергия) ==========
+    electricalMonitor = new QQuickWidget(infoTab);
+    electricalMonitor->setFixedSize(220, 150);
+    electricalMonitor->setResizeMode(QQuickWidget::SizeRootObjectToView);
+    electricalMonitor->setSource(QUrl("qrc:/qml/ValueControl.qml"));  // имя файла из вашего вопроса
+    electricalMonitor->move(700, 220);   // подберите координаты под свой макет
 
-
+    // Инициализация интегратора энергии
+    m_lastEnergyTime = QDateTime::currentDateTime();
+    m_energyWh = 0.0;
 
 
     // ========== 6. График для вкладки Статистика ==========
@@ -470,6 +478,31 @@ void MainWindow::onBldcDataUpdated()
                  << "Freq:" << currentFrequencyKhz << "kHz"
                  << "Duty:" << currentDutyPercent << "%";
     }
+
+    // Обновляем ElectricalMonitor
+    if (electricalMonitor && electricalMonitor->rootObject()) {
+        QObject *monitor = electricalMonitor->rootObject();
+
+        // Ток (из currentTorque, предполагаем, что это амперы)
+        monitor->setProperty("currentValue", static_cast<double>(currentTorque));
+
+        // Напряжение (если есть)
+        monitor->setProperty("voltageValue", static_cast<double>(currentCalculatedVoltage));
+
+        // Мощность (из currentPower, Вт)
+        monitor->setProperty("powerValue", static_cast<double>(currentPower));
+
+        // Интеграция энергии (Вт·ч)
+        QDateTime now = QDateTime::currentDateTime();
+        qint64 ms = m_lastEnergyTime.msecsTo(now);
+        if (ms > 0 && currentPower > 0) {  // накапливаем только при положительной мощности
+            double hours = ms / 3600000.0;
+            m_energyWh += static_cast<double>(currentPower) * hours;
+            m_lastEnergyTime = now;
+        }
+        monitor->setProperty("energyWh", m_energyWh);
+    }
+
 
     updateSpeed(currentSpeed);
     updatePower(currentPower);

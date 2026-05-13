@@ -8,6 +8,8 @@
 #include <QQuickWidget>
 #include <QTimer>
 #include <QElapsedTimer>
+#include <QDateTime>
+
 
 class RelayDevice;
 class BldcDriverDevice;
@@ -69,6 +71,7 @@ private:
     QQuickWidget *m_chartWidget;
     QQuickWidget *pwmControlWidget;
     QQuickWidget *pwmPanelWidget;
+    QQuickWidget *electricalMonitor;
 
     RelayDevice *m_relayDevice;
     BldcDriverDevice *m_bldcDevice;
@@ -80,6 +83,9 @@ private:
     static constexpr int PWM_MAX = 2000;
     bool m_isStarting;
     int m_currentStep;
+
+    double m_energyWh = 0.0;
+    QDateTime m_lastEnergyTime;
 
     // Переменные для ШИМ
     int targetPwm;   // Целевое значение ШИМ
